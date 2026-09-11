@@ -5,6 +5,7 @@ umask 027
 APP_DIR="/home/lojabelastock/htdocs/belastock.com.br"
 APP_USER="lojabelastock"
 APP_GROUP="lojabelastock"
+SITE_DOMAIN="belastock.com.br"
 VHOST="/etc/nginx/sites-enabled/belastock.com.br.conf"
 BACKUP_ROOT="/home/lojabelastock/backups"
 STAMP="$(date +%Y%m%d_%H%M%S)"
@@ -17,6 +18,7 @@ DB_NAME="belastock_node"
 DB_USER="belastock_node"
 APP_PORT="3210"
 CRED_FILE="/root/BELASTOCK_CREDENTIALS_${STAMP}.txt"
+MYSQL_ADMIN_MODE=""
 
 fail() {
   local code=$?
@@ -40,7 +42,19 @@ printf '============================================================\n\n'
 # 1) Pré-validação antes de alterar o servidor
 command -v mysql >/dev/null || { echo "MySQL client ausente"; exit 2; }
 command -v nginx >/dev/null || { echo "Nginx ausente"; exit 2; }
-mysql -NBe 'SELECT 1' >/dev/null || { echo "Root local do MySQL não está acessível via socket"; exit 3; }
+
+# CloudPanel protege o root do MySQL com senha. Nunca assume root sem senha.
+if mysql -NBe 'SELECT 1' >/dev/null 2>&1; then
+  MYSQL_ADMIN_MODE="socket-root"
+elif command -v clpctl >/dev/null 2>&1 && clpctl db:show:master-credentials >/dev/null 2>&1; then
+  MYSQL_ADMIN_MODE="cloudpanel"
+else
+  echo "Não foi possível obter um método administrativo seguro para o MySQL."
+  echo "Nem root via socket nem CloudPanel clpctl estão disponíveis."
+  exit 3
+fi
+
+echo "MySQL admin mode: $MYSQL_ADMIN_MODE"
 [[ -f /etc/nginx/ssl-certificates/belastock.com.br.crt ]] || { echo "Certificado SSL não encontrado"; exit 4; }
 [[ -f /etc/nginx/ssl-certificates/belastock.com.br.key ]] || { echo "Chave SSL não encontrada"; exit 4; }
 
@@ -52,14 +66,20 @@ else
   printf 'Diretório estava vazio em %s\n' "$(date -Is)" > "$BACKUP_DIR/site-was-empty.txt"
 fi
 [[ -f "$VHOST" ]] && cp -a "$VHOST" "$BACKUP_DIR/belastock.com.br.conf.before"
-mysql -NBe "SHOW DATABASES" > "$BACKUP_DIR/mysql-databases.before.txt"
+printf 'mysql_admin_mode=%s\n' "$MYSQL_ADMIN_MODE" > "$BACKUP_DIR/mysql-admin-mode.txt"
+if [[ "$MYSQL_ADMIN_MODE" == "socket-root" ]]; then
+  mysql -NBe "SHOW DATABASES" > "$BACKUP_DIR/mysql-databases.before.txt" 2>/dev/null || true
+else
+  # Não grava credenciais-mestre do CloudPanel em backup/log.
+  printf 'CloudPanel master credentials intentionally not exported.\n' > "$BACKUP_DIR/mysql-databases.before.txt"
+fi
 nginx -T > "$BACKUP_DIR/nginx-T.before.txt" 2>&1 || true
 ss -lntup > "$BACKUP_DIR/ports.before.txt" 2>&1 || true
 
 # 3) Dependências do runtime
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y --no-install-recommends nodejs npm git unzip curl ca-certificates rsync openssl >/dev/null
+apt-get install -y --no-install-recommends nodejs npm git unzip curl ca-certificates rsync openssl sudo >/dev/null
 NODE_MAJOR="$(node -p 'Number(process.versions.node.split(".")[0])')"
 if (( NODE_MAJOR < 20 )); then
   echo "Node.js $(node -v) é antigo. Necessário >=20. Abortando sem trocar o vhost."
@@ -116,7 +136,8 @@ LEGACY_DB_USER=
 LEGACY_DB_PASSWORD=
 EOF
 
-  mysql <<SQL
+  if [[ "$MYSQL_ADMIN_MODE" == "socket-root" ]]; then
+    mysql <<SQL
 CREATE DATABASE IF NOT EXISTS \`$DB_NAME\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE USER IF NOT EXISTS '$DB_USER'@'localhost' IDENTIFIED BY '$DB_PASS';
 ALTER USER '$DB_USER'@'localhost' IDENTIFIED BY '$DB_PASS';
@@ -126,6 +147,14 @@ GRANT ALL PRIVILEGES ON \`$DB_NAME\`.* TO '$DB_USER'@'localhost';
 GRANT ALL PRIVILEGES ON \`$DB_NAME\`.* TO '$DB_USER'@'127.0.0.1';
 FLUSH PRIVILEGES;
 SQL
+  else
+    # CloudPanel v2: cria banco + usuário através da CLI oficial, sem revelar master password.
+    clpctl db:add \
+      --domainName="$SITE_DOMAIN" \
+      --databaseName="$DB_NAME" \
+      --databaseUserName="$DB_USER" \
+      --databaseUserPassword="$DB_PASS"
+  fi
 
   cat > "$CRED_FILE" <<EOF
 BELA STOCK NODE 2.0
@@ -229,11 +258,21 @@ PUBLIC_STATUS="$(curl -sS -o /dev/null -w '%{http_code}' https://belastock.com.b
 PUBLIC_LOCATION="$(curl -sSI https://belastock.com.br/ 2>/dev/null | awk 'BEGIN{IGNORECASE=1}/^location:/{print $2}' | tr -d '\r' | head -1)"
 
 sudo -u "$APP_USER" -H pm2 status belastock || true
-mysql -NBe "SELECT COUNT(*) AS tables_count FROM information_schema.tables WHERE table_schema='$DB_NAME';" | tee "$BACKUP_DIR/db-table-count.txt"
+
+# Valida o banco com o usuário da própria aplicação; não usa root/master credentials.
+set -a
+# shellcheck disable=SC1091
+source "$APP_DIR/.env"
+set +a
+MYSQL_PWD="$DB_PASSWORD" mysql -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -NBe \
+  "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$DB_NAME';" \
+  | tee "$BACKUP_DIR/db-table-count.txt"
+unset MYSQL_PWD
 
 printf '\n============================================================\n'
 printf ' BELA STOCK - RESULTADO FINAL\n'
 printf '============================================================\n'
+printf 'MySQL admin: %s\n' "$MYSQL_ADMIN_MODE"
 printf 'Node: %s\n' "$(node -v)"
 printf 'npm: %s\n' "$(npm -v)"
 printf 'PM2: %s\n' "$(pm2 -v)"
