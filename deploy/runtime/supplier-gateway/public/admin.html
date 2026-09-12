@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Bela Stock · Super Admin</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body class="admin-page">
+<div class="admin">
+  <aside class="sidebar">
+    <h1>BELA STOCK</h1><p class="muted">AI Commerce 2.1</p>
+    <a href="#dashboard">Dashboard</a><a href="#suppliers">Fornecedores</a><a href="#simulator">Simulador</a><a href="#ai">Central de IA</a><a href="/">Ver loja</a>
+  </aside>
+  <main class="main">
+    <div class="row"><div><h1>Super Admin</h1><p class="muted">Operação multi-fornecedor da Bela Stock</p></div></div>
+    <div class="card"><div class="row"><input id="token" type="password" placeholder="ADMIN_TOKEN"><button class="btn" onclick="saveToken()">Entrar</button><span id="auth-state" class="muted"></span></div></div>
+
+    <section id="dashboard" class="section" style="padding-left:0;padding-right:0"><h2>Visão geral</h2><div class="kpis" id="kpis"></div></section>
+
+    <section id="suppliers">
+      <h2>Fornecedores</h2>
+      <div class="card">
+        <h3>Adicionar conector WooCommerce</h3>
+        <p class="muted">O fornecedor continua em WooCommerce; a Bela Stock apenas lê e normaliza o catálogo.</p>
+        <div class="row"><input id="s-name" placeholder="Fornecedor"><input id="s-url" placeholder="https://loja-fornecedor.com"><input id="s-key" placeholder="Consumer Key"><input id="s-secret" type="password" placeholder="Consumer Secret"><input id="s-interval" type="number" min="5" value="60" placeholder="Minutos"><button class="btn" onclick="addSupplier()">Adicionar</button></div>
+      </div>
+      <div class="card" style="margin-top:16px"><table><thead><tr><th>Fornecedor</th><th>Tipo</th><th>Status</th><th>Última sync</th><th>Ações</th></tr></thead><tbody id="supplier-list"></tbody></table></div>
+    </section>
+
+    <section id="simulator" class="section" style="padding-left:0;padding-right:0">
+      <h2>Simulador / Pré-importação</h2>
+      <div class="card" id="sim-empty"><p class="muted">Clique em <strong>Simular</strong> em um fornecedor. Nenhum produto será publicado nesta etapa.</p></div>
+      <div id="sim-panel" style="display:none">
+        <div class="card">
+          <div class="row"><div><h3 id="sim-title">Fornecedor</h3><p class="muted" id="sim-summary"></p></div><span style="flex:1"></span><button onclick="loadStaged()">Ver fila baixada</button></div>
+          <div class="row" style="margin-top:12px">
+            <label>Margem % <input id="rule-margin" type="number" min="0" max="94" step="0.1" value="40"></label>
+            <label>Custo fixo <input id="rule-overhead" type="number" min="0" step="0.01" value="0"></label>
+            <label>Estoque mínimo <input id="rule-min-stock" type="number" min="0" step="1" value="0"></label>
+            <button onclick="saveSupplierRules()">Salvar regras</button>
+            <button class="btn" onclick="syncCurrentSupplier()">Baixar catálogo para fila</button>
+          </div>
+        </div>
+        <div class="card" style="margin-top:16px;overflow:auto">
+          <div class="row"><button onclick="selectAllPreview(true)">Selecionar todos</button><button onclick="selectAllPreview(false)">Limpar</button><button class="btn" onclick="importSelected()">Importar selecionados como rascunho</button></div>
+          <table style="margin-top:12px"><thead><tr><th></th><th>Produto</th><th>SKU</th><th>Custo origem</th><th>Preço sugerido</th><th>Estoque</th><th>Validação</th></tr></thead><tbody id="sim-list"></tbody></table>
+        </div>
+      </div>
+    </section>
+
+    <section id="ai" class="section" style="padding-left:0;padding-right:0"><h2>Central de IA</h2><div class="card"><div class="row"><button class="btn" onclick="runAI()">Executar ciclo agora</button><span id="ai-state" class="muted"></span></div></div></section>
+  </main>
+</div>
+<script src="/app.js"></script>
+</body></html>
