@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="pt-BR">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Painel do Parceiro · Bela Stock</title><link rel="stylesheet" href="/styles.css"></head>
+<body class="admin-page">
+<div class="admin">
+  <aside class="sidebar">
+    <h1 id="partner-store-name">BELA STOCK</h1><p class="muted">Painel do Parceiro</p>
+    <a href="#overview">Visão geral</a><a href="#products">Produtos</a><a href="#payments">Pagamentos</a><a href="#shipping">Transportadoras</a><a href="#orders">Pedidos</a><a href="/">Ver loja</a>
+  </aside>
+  <main class="main">
+    <div id="partner-auth" class="card">
+      <h2>Entrar no painel</h2>
+      <div class="row"><input id="p-email" type="email" placeholder="E-mail"><input id="p-password" type="password" placeholder="Senha"><button class="btn" onclick="partnerLogin()">Entrar</button></div>
+      <p id="p-auth-message" class="muted"></p>
+    </div>
+
+    <div id="partner-panel" style="display:none">
+      <div class="row"><div><h1>Painel da loja</h1><p class="muted" id="partner-welcome"></p></div><span style="flex:1"></span><button onclick="partnerLogout()">Sair</button></div>
+      <section id="overview" class="section" style="padding-left:0;padding-right:0"><h2>Visão geral</h2><div class="kpis" id="partner-kpis"></div><div class="card" style="margin-top:16px"><h3>Domínios</h3><div id="partner-domains"></div></div></section>
+
+      <section id="products">
+        <h2>Produtos da loja</h2>
+        <div class="card"><h3>Adicionar produto próprio</h3><div class="row"><input id="prod-name" placeholder="Nome"><input id="prod-sku" placeholder="SKU"><input id="prod-price" type="number" min="0" step="0.01" placeholder="Preço"><input id="prod-stock" type="number" step="1" placeholder="Estoque"></div><div class="row" style="margin-top:10px"><label><input id="prod-carrier" type="checkbox"> Precisa de transportadora</label><input id="prod-weight" type="number" min="0" step="0.001" placeholder="Peso kg"><input id="prod-length" type="number" min="0" step="0.1" placeholder="Comprimento cm"><input id="prod-width" type="number" min="0" step="0.1" placeholder="Largura cm"><input id="prod-height" type="number" min="0" step="0.1" placeholder="Altura cm"><input id="prod-carriers" placeholder="Transportadoras permitidas: correios,melhor_envio"><button class="btn" onclick="createOwnProduct()">Adicionar</button></div></div>
+        <div class="card" style="margin-top:16px;overflow:auto"><table><thead><tr><th>Produto</th><th>Origem</th><th>Status</th><th>Preço</th></tr></thead><tbody id="partner-products"></tbody></table></div>
+      </section>
+
+      <section id="payments" class="section" style="padding-left:0;padding-right:0"><h2>Gateways de pagamento</h2><div class="card"><div class="row"><select id="pay-provider"></select><input id="pay-name" placeholder="Nome exibido"><label><input id="pay-enabled" type="checkbox"> Ativo</label><label><input id="pay-sandbox" type="checkbox" checked> Sandbox</label></div><textarea id="pay-credentials" placeholder='Credenciais em JSON, ex.: {"accessToken":"..."}' style="width:100%;min-height:100px;margin-top:10px"></textarea><textarea id="pay-config" placeholder='Configuração em JSON, ex.: {"pix":true,"credit_card":true}' style="width:100%;min-height:80px;margin-top:10px"></textarea><button class="btn" onclick="savePaymentGateway()">Salvar gateway</button></div><div id="payment-list" style="margin-top:16px"></div></section>
+
+      <section id="shipping"><h2>Transportadoras</h2><div class="card"><div class="row"><select id="ship-provider"></select><input id="ship-name" placeholder="Nome da transportadora"><label><input id="ship-enabled" type="checkbox"> Ativa</label></div><textarea id="ship-credentials" placeholder='Credenciais em JSON' style="width:100%;min-height:100px;margin-top:10px"></textarea><textarea id="ship-config" placeholder='Configuração em JSON, ex.: {"originZip":"23970-000"}' style="width:100%;min-height:80px;margin-top:10px"></textarea><button class="btn" onclick="saveShippingCarrier()">Salvar transportadora</button></div><div id="shipping-list" style="margin-top:16px"></div></section>
+
+      <section id="orders" class="section" style="padding-left:0;padding-right:0"><h2>Pedidos</h2><div class="card" style="overflow:auto"><table><thead><tr><th>Pedido</th><th>Status</th><th>Total</th><th>Data</th></tr></thead><tbody id="partner-orders"></tbody></table></div></section>
+    </div>
+  </main>
+</div>
+<script src="/partner.js"></script>
+</body></html>
