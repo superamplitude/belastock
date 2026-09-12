@@ -201,18 +201,14 @@ CREATE TABLE IF NOT EXISTS shipments (
   CONSTRAINT fk_shipment_carrier FOREIGN KEY (shipping_carrier_id) REFERENCES shipping_carriers(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-ALTER TABLE products ADD COLUMN owner_tenant_id BIGINT UNSIGNED NOT NULL DEFAULT 1 AFTER id;
-ALTER TABLE orders ADD COLUMN tenant_id BIGINT UNSIGNED NOT NULL DEFAULT 1 AFTER id;
-ALTER TABLE orders ADD COLUMN customer_id BIGINT UNSIGNED NULL AFTER tenant_id;
-ALTER TABLE conversations ADD COLUMN tenant_id BIGINT UNSIGNED NOT NULL DEFAULT 1 AFTER id;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS owner_tenant_id BIGINT UNSIGNED NOT NULL DEFAULT 1 AFTER id;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS tenant_id BIGINT UNSIGNED NOT NULL DEFAULT 1 AFTER id;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_id BIGINT UNSIGNED NULL AFTER tenant_id;
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS tenant_id BIGINT UNSIGNED NOT NULL DEFAULT 1 AFTER id;
 
-ALTER TABLE products ADD KEY idx_products_owner_tenant (owner_tenant_id,status);
-ALTER TABLE orders ADD KEY idx_orders_tenant_status (tenant_id,status,created_at);
-ALTER TABLE conversations ADD KEY idx_conversations_tenant (tenant_id,status,updated_at);
-ALTER TABLE products ADD CONSTRAINT fk_products_owner_tenant FOREIGN KEY (owner_tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT;
-ALTER TABLE orders ADD CONSTRAINT fk_orders_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT;
-ALTER TABLE orders ADD CONSTRAINT fk_orders_customer FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL;
-ALTER TABLE conversations ADD CONSTRAINT fk_conversations_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT;
+ALTER TABLE products ADD INDEX IF NOT EXISTS idx_products_owner_tenant (owner_tenant_id,status);
+ALTER TABLE orders ADD INDEX IF NOT EXISTS idx_orders_tenant_status (tenant_id,status,created_at);
+ALTER TABLE conversations ADD INDEX IF NOT EXISTS idx_conversations_tenant (tenant_id,status,updated_at);
 
 INSERT INTO tenant_product_listings (tenant_id,product_id,source_mode,enabled,store_name,store_slug)
 SELECT 1,id,'platform',1,name,slug FROM products
