@@ -7,7 +7,6 @@ APP_USER="lojabelastock"
 APP_GROUP="lojabelastock"
 DOMAIN="belastock.com.br"
 STAMP="$(date +%Y%m%d_%H%M%S)"
-SHORT="$(date +%m%d%H%M%S)"
 BACKUP_DIR="/home/lojabelastock/backups/db-recovery-$STAMP"
 RECOVERY_URL="https://raw.githubusercontent.com/superamplitude/belastock/main/deploy/EXECUCAO_TOTAL_RECOVERY.sh"
 RECOVERY_LOCAL="/root/EXECUCAO_TOTAL_RECOVERY.sh"
@@ -72,38 +71,61 @@ fi
 if (( CURRENT_OK )); then
   say "Banco atual ja autentica; nenhuma troca de banco sera feita"
 else
-  say "Banco atual nao autentica. Preservando base antiga antes de provisionar nova"
-  DUMP_FILE="$BACKUP_DIR/${OLD_DB:-belastock_antigo}.sql.gz"
+  say "Banco atual nao autentica. Preservando base antiga sem apagar nem alterar"
+  DUMP_FILE="$BACKUP_DIR/${OLD_DB:-belastockantigo}.sql.gz"
   OLD_EXPORTED=0
+
+  # Tenta exportacao oficial do CloudPanel. Se o banco antigo tiver nome legado
+  # que o CloudPanel recuse, ele simplesmente fica intacto no MySQL.
   if [[ -n "$OLD_DB" ]]; then
     if clpctl db:export --databaseName="$OLD_DB" --file="$DUMP_FILE" >/dev/null 2>&1; then
       OLD_EXPORTED=1
       echo "Backup logico do banco antigo criado com sucesso."
     else
-      echo "Aviso: CloudPanel nao conseguiu exportar o banco antigo. Ele NAO sera apagado nem alterado."
+      echo "Aviso: banco antigo nao foi exportado pelo CloudPanel; ele permanece intacto e nao sera removido."
       rm -f "$DUMP_FILE"
     fi
   fi
 
-  say "Criando banco e usuario NOVOS pelo CloudPanel, sem usar credencial master"
-  NEW_DB="belastock_live_${SHORT}"
-  NEW_USER="bs_${SHORT}"
+  say "Criando banco e usuario dedicados pelo CloudPanel com nomes validos"
+  CREATED=0
   NEW_PASS="$(openssl rand -hex 24)"
 
-  clpctl db:add \
-    --domainName="$DOMAIN" \
-    --databaseName="$NEW_DB" \
-    --databaseUserName="$NEW_USER" \
-    --databaseUserPassword="$NEW_PASS"
+  # Somente letras minusculas e numeros, nomes curtos e iniciando por letra.
+  # Tenta ate 8 pares distintos para evitar colisao sem intervencao manual.
+  for attempt in 1 2 3 4 5 6 7 8; do
+    token="$(date +%m%d%H%M%S)${attempt}"
+    token="${token:0:10}"
+    NEW_DB="bsdb${token}"
+    NEW_USER="bsu${token}"
+
+    echo "Tentativa $attempt: DB=$NEW_DB USER=$NEW_USER"
+    if clpctl db:add \
+      --domainName="$DOMAIN" \
+      --databaseName="$NEW_DB" \
+      --databaseUserName="$NEW_USER" \
+      --databaseUserPassword="$NEW_PASS"; then
+      CREATED=1
+      break
+    fi
+    sleep 1
+  done
+
+  if (( ! CREATED )); then
+    echo "ERRO: CloudPanel recusou todos os nomes seguros tentados para banco/usuario."
+    echo "Executando ajuda do comando para diagnostico final:"
+    clpctl db:add --help || true
+    exit 20
+  fi
 
   if (( OLD_EXPORTED )); then
     say "Importando automaticamente os dados preservados para o banco novo"
     clpctl db:import --databaseName="$NEW_DB" --file="$DUMP_FILE"
   else
-    say "Banco antigo indisponivel para exportacao; mantendo-o intacto e deixando migrations criarem a estrutura nova"
+    say "Banco antigo continua preservado; migrations criarao a estrutura no banco novo"
   fi
 
-  say "Gravando novas credenciais dedicadas no .env"
+  say "Gravando credenciais novas no .env"
   set_env DB_HOST 127.0.0.1
   set_env DB_PORT 3306
   set_env DB_NAME "$NEW_DB"
@@ -112,17 +134,21 @@ else
   chown "$APP_USER:$APP_GROUP" "$APP_DIR/.env"
   chmod 640 "$APP_DIR/.env"
 
-  say "Validando imediatamente o banco novo"
+  say "Validando autenticacao do banco novo"
   MYSQL_PWD="$NEW_PASS" mysql -h 127.0.0.1 -P 3306 -u "$NEW_USER" -NBe 'SELECT 1' "$NEW_DB" >/dev/null
   echo "BANCO_NOVO_AUTENTICACAO=OK"
-  echo "DB_NAME=$NEW_DB" > "$BACKUP_DIR/recovery-summary.txt"
-  echo "DB_USER=$NEW_USER" >> "$BACKUP_DIR/recovery-summary.txt"
-  echo "OLD_DB=${OLD_DB:-nao-configurado}" >> "$BACKUP_DIR/recovery-summary.txt"
-  echo "OLD_DB_EXPORTADO=$OLD_EXPORTED" >> "$BACKUP_DIR/recovery-summary.txt"
+
+  {
+    echo "DB_NAME=$NEW_DB"
+    echo "DB_USER=$NEW_USER"
+    echo "OLD_DB=${OLD_DB:-nao-configurado}"
+    echo "OLD_DB_EXPORTADO=$OLD_EXPORTED"
+    echo "OLD_DB_PRESERVADO=1"
+  } > "$BACKUP_DIR/recovery-summary.txt"
   chmod 600 "$BACKUP_DIR/recovery-summary.txt"
 fi
 
-say "Executando recovery integral do Bela Stock sobre o banco ja funcional"
+say "Executando recovery integral do Bela Stock sobre banco funcional"
 curl -fsSL --retry 3 --connect-timeout 15 "$RECOVERY_URL" -o "$RECOVERY_LOCAL"
 chmod 700 "$RECOVERY_LOCAL"
 exec bash "$RECOVERY_LOCAL"
