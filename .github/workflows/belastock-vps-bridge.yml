@@ -1,0 +1,95 @@
+name: Bela Stock VPS Bridge
+
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: "Tarefa Bela Stock a executar na VPS"
+        required: true
+        default: "verify"
+        type: choice
+        options:
+          - health
+          - status
+          - verify
+          - execute
+  push:
+    branches:
+      - main
+    paths:
+      - '.belastock/bridge-command.txt'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: belastock-vps-production
+  cancel-in-progress: false
+
+jobs:
+  bridge:
+    name: Bela Stock production bridge
+    runs-on: [self-hosted, linux, x64, belastock-prod]
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolver tarefa
+        id: task
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TASK="${{ inputs.task }}"
+          else
+            test -f .belastock/bridge-command.txt
+            TASK="$(head -n1 .belastock/bridge-command.txt | tr -d '\r\n ' )"
+          fi
+          case "$TASK" in
+            health|status|verify|execute) ;;
+            *) echo "[ERRO] Tarefa nao autorizada: $TASK" >&2; exit 1 ;;
+          esac
+          echo "value=$TASK" >> "$GITHUB_OUTPUT"
+          echo "TASK=$TASK"
+
+      - name: Contexto da VPS
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          echo "HOST=$(hostname)"
+          echo "USER=$(id -un)"
+          echo "DATE=$(date -Is)"
+          echo "TASK=${{ steps.task.outputs.value }}"
+
+      - name: Health
+        if: ${{ steps.task.outputs.value == 'health' || steps.task.outputs.value == 'verify' }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo -n /usr/local/sbin/belastock-vps-control health
+
+      - name: Status
+        if: ${{ steps.task.outputs.value == 'status' || steps.task.outputs.value == 'verify' }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo -n /usr/local/sbin/belastock-vps-control status
+
+      - name: Executar tarefa auditavel
+        if: ${{ steps.task.outputs.value == 'execute' }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -f .belastock/vps-task.sh
+          bash .belastock/vps-task.sh
+
+      - name: Verificacao publica
+        if: ${{ steps.task.outputs.value == 'verify' }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          CODE="$(curl -kLsS --max-redirs 5 --max-time 30 -o /dev/null -w '%{http_code}' "https://belastock.com.br/?bridge=$(date +%s)" || true)"
+          echo "PUBLIC_HTTP=$CODE"
+          test "$CODE" = "200"
