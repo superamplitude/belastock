@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="pt-BR">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Minha Conta · Bela Stock</title><link rel="stylesheet" href="/styles.css"></head>
+<body class="admin-page">
+<div class="admin">
+  <aside class="sidebar">
+    <h1 id="store-name">BELA STOCK</h1><p class="muted">Painel do Cliente</p>
+    <a href="#inicio">Início</a><a href="#pedidos">Pedidos</a><a href="#entregas">Entregas</a><a href="#pagamentos">Pagamentos</a><a href="#enderecos">Endereços</a><a href="/">Voltar à loja</a>
+  </aside>
+  <main class="main">
+    <div id="auth-box" class="card">
+      <h2>Entrar</h2>
+      <div class="row"><input id="login-email" type="email" placeholder="E-mail"><input id="login-password" type="password" placeholder="Senha"><button class="btn" onclick="customerLogin()">Entrar</button></div>
+      <hr style="margin:18px 0"><h3>Criar conta</h3>
+      <div class="row"><input id="reg-name" placeholder="Nome"><input id="reg-email" type="email" placeholder="E-mail"><input id="reg-phone" placeholder="Telefone"><input id="reg-password" type="password" placeholder="Senha (mín. 8)"><button onclick="customerRegister()">Cadastrar</button></div>
+      <p id="auth-message" class="muted"></p>
+    </div>
+
+    <div id="panel-box" style="display:none">
+      <div class="row"><div><h1>Minha conta</h1><p class="muted" id="customer-welcome"></p></div><span style="flex:1"></span><button onclick="customerLogout()">Sair</button></div>
+      <section id="inicio" class="section" style="padding-left:0;padding-right:0"><h2>Visão geral</h2><div class="kpis" id="customer-kpis"></div></section>
+      <section id="pedidos"><h2>Pedidos</h2><div class="card" style="overflow:auto"><table><thead><tr><th>Pedido</th><th>Status</th><th>Total</th><th>Data</th></tr></thead><tbody id="orders-list"></tbody></table></div></section>
+      <section id="entregas" class="section" style="padding-left:0;padding-right:0"><h2>Entregas</h2><div class="card" style="overflow:auto"><table><thead><tr><th>Pedido</th><th>Transportadora</th><th>Status</th><th>Rastreio</th><th>Previsão</th></tr></thead><tbody id="shipments-list"></tbody></table></div></section>
+      <section id="pagamentos"><h2>Pagamentos</h2><div class="card" style="overflow:auto"><table><thead><tr><th>Pedido</th><th>Gateway</th><th>Método</th><th>Status</th><th>Valor</th></tr></thead><tbody id="payments-list"></tbody></table></div></section>
+      <section id="enderecos" class="section" style="padding-left:0;padding-right:0"><h2>Endereços</h2><div class="card"><div id="addresses-list"></div><h3>Novo endereço</h3><div class="row"><input id="addr-label" placeholder="Nome: Casa/Trabalho"><input id="addr-zip" placeholder="CEP"><input id="addr-street" placeholder="Rua"><input id="addr-number" placeholder="Número"><input id="addr-district" placeholder="Bairro"><input id="addr-city" placeholder="Cidade"><input id="addr-state" placeholder="UF"><button class="btn" onclick="saveAddress()">Salvar endereço</button></div></div></section>
+    </div>
+  </main>
+</div>
+<script src="/customer.js"></script>
+</body></html>
