@@ -1,80 +1,165 @@
-# Bela Stock AI Commerce 2.0
+# Bela Stock AI Commerce 2.2
 
-Reconstrução nativa em Node.js da Bela Stock. O núcleo não depende de WordPress ou WooCommerce. WooCommerce passa a existir somente como **adaptador de fornecedores e fonte de migração**.
+Plataforma nativa em **Node.js + Fastify + MySQL**, independente de WordPress. WooCommerce é apenas um **conector de fornecedor** e fonte possível de migração/sincronização; o domínio interno da Bela Stock permanece desacoplado do schema WooCommerce.
+
+## Estado atual
+
+Produção canônica: `https://belastock.com.br`
+
+A versão `2.2.0` está publicada e validada na VPS por GitHub Actions self-hosted runner, com banco, migrations, PM2, Nginx, páginas públicas e fronteiras de autenticação testadas end-to-end. Consulte `STATUS.md` para a evidência operacional atual.
 
 ## Princípios
 
 - Node.js + Fastify + MySQL.
-- IA como orquestrador operacional central.
+- IA como camada central de orquestração operacional.
 - Supplier Gateway desacoplado do catálogo interno.
-- WooCommerce Adapter bidirecional.
+- WooCommerce tratado como adaptador, nunca como núcleo da plataforma.
+- Multi-fornecedor e multi-loja/white-label.
 - Estoque, preço, catálogo, pedidos, atendimento e operações auditáveis.
-- Ações sensíveis ficam protegidas por nível de autonomia: `automatic`, `supervised` ou `approval`.
-- Credenciais de fornecedores criptografadas em AES-256-GCM.
+- Ações sensíveis protegidas por nível de autonomia: `automatic`, `supervised` ou `approval`.
+- Credenciais de integrações armazenadas criptografadas em AES-256-GCM.
 - Log de auditoria para ações administrativas e da IA.
-- Migração preserva produtos, estampas, templates e metadados específicos da Bela Stock.
+- Dados separados por tenant para parceiros e lojas white-label.
 
-## Estrutura
+## Supplier Gateway
+
+O gateway de fornecedores permite que fontes externas sejam normalizadas para o modelo interno Bela Stock antes da publicação.
+
+Fluxo:
+
+```text
+Fornecedor
+  -> Adaptador (WooCommerce/API/JSON/XML/CSV/etc.)
+  -> Normalização
+  -> Simulador / pré-importação
+  -> Regras de estoque, margem e catálogo
+  -> Aprovação
+  -> Catálogo Bela Stock
+  -> Sincronização controlada
+```
+
+O adaptador WooCommerce lê a REST API do fornecedor, normaliza produtos e mantém IDs/SKUs externos vinculados aos itens internos sem acoplamento ao schema WordPress.
+
+## Multi-store / White-label
+
+A 2.2 adiciona a base para comercialização de lojas parceiras sobre o mesmo núcleo Bela Stock:
+
+- tenant por parceiro;
+- domínio próprio por tenant;
+- marca e configurações por loja;
+- usuários e permissões por parceiro;
+- catálogo Bela Stock + produtos próprios do parceiro;
+- preço/margem por listagem;
+- gateways próprios por loja;
+- transportadoras próprias por loja;
+- plano, mensalidade e taxa da plataforma;
+- sessões independentes de cliente e parceiro.
+
+O host da requisição resolve o tenant correspondente. `belastock.com.br` é o tenant raiz da plataforma.
+
+## Pagamentos
+
+Catálogo estrutural disponível por tenant:
+
+- Mercado Pago;
+- PagBank;
+- Pagar.me;
+- Stripe;
+- PIX manual.
+
+Credenciais externas não ficam hard-coded no projeto. Cada tenant configura seus próprios dados de integração. Transações reais só devem ser ativadas após configuração e validação do respectivo provedor.
+
+## Frete e transportadoras
+
+Catálogo estrutural disponível por tenant:
+
+- Correios;
+- Melhor Envio;
+- Frenet;
+- Jadlog;
+- transportadora própria/customizada;
+- fulfillment pelo fornecedor;
+- retirada.
+
+Cada produto pode definir se exige envio físico e/ou transportadora, peso, dimensões, classe de frete e transportadoras permitidas.
+
+## Painéis
+
+Rotas públicas principais:
+
+- `/` — loja pública;
+- `/cliente` — Painel do Cliente;
+- `/parceiro` — Painel do Parceiro;
+- `/admin` — Super Admin.
+
+APIs privadas retornam `401` sem sessão/token válido.
+
+## IA central
+
+A tabela `ai_actions` registra decisões, risco, justificativa, modo de autonomia, aprovação e resultado. O núcleo já suporta a evolução da IA sobre fornecedores, catálogo, preço, estoque, roteamento de pedidos, atendimento, marketing e qualidade.
+
+A IA não recebe autorização irrestrita para credenciais, conta bancária, exclusões ou pagamentos. Operações sensíveis permanecem governadas por política e auditoria.
+
+## Estrutura principal
 
 ```text
 src/
-  ai/orchestrator.mjs
-  suppliers/woocommerce.mjs
-  services/supplier-service.mjs
-  security/crypto.mjs
+  ai/
+  commerce/
+    payment/
+    shipping/
+  services/
+  suppliers/
+  security/
   server.mjs
-migrations/001_init.sql
-scripts/migrate.mjs
-scripts/import-legacy-wordpress.mjs
+migrations/
+  001_init.sql
+  002_supplier_gateway.sql
+  003_multistore_payments_shipping.sql
+  004_customer_sessions_partner_subscriptions.sql
+  005_partner_user_sessions.sql
 public/
 deploy/
 tests/
 ```
 
-## Supplier Gateway
+## Produção
 
-O adaptador WooCommerce lê `/wp-json/wc/v3`, normaliza produtos para `supplier_items` e mantém a estrutura externa fora do domínio principal. A vinculação de ofertas a produtos/variantes internos ocorre pela camada de normalização e decisão da Bela Stock.
-
-## IA central
-
-A tabela `ai_actions` registra decisões, risco, justificativa, modo de autonomia, aprovação e resultado. O primeiro executor ativo é `supplier.sync`; a arquitetura foi preparada para catálogo, preço, estoque, roteamento de pedidos, atendimento, marketing e qualidade.
-
-A IA nunca recebe carta branca para credenciais, conta bancária, exclusões ou pagamentos. A autonomia é governada por política e auditada.
-
-## Instalação alvo
-
-Diretório de produção:
+Diretório:
 
 ```text
 /home/lojabelastock/htdocs/belastock.com.br
 ```
 
-Execute na VPS:
+Porta interna canônica:
 
-```bash
-git clone https://github.com/superamplitude/belastock.git /home/lojabelastock/htdocs/belastock.com.br
-cd /home/lojabelastock/htdocs/belastock.com.br
-cp .env.example .env
-# configure .env
-npm install --omit=dev
-npm run migrate
-pm2 startOrReload ecosystem.config.cjs
-pm2 save
+```text
+127.0.0.1:3210
 ```
 
-O script `deploy/install.sh` faz backup do conteúdo anterior antes da instalação e não instala silenciosamente dependências de sistema.
+O Nginx publica o domínio HTTPS e encaminha ao runtime Node nessa porta.
 
-## Migração do legado
+## Deploy e controle
 
-1. Importe o dump antigo em um banco isolado, por exemplo `belastock_legacy`.
-2. Configure `LEGACY_DB_*` no `.env`.
-3. Execute:
+O projeto utiliza GitHub Actions com runner self-hosted na VPS. A ponte de produção permite execução auditável sem depender de comandos SSH manuais para cada alteração.
 
-```bash
-npm run legacy:import
+Arquivos principais:
+
+```text
+.github/workflows/belastock-vps-bridge.yml
+deploy/BELASTOCK_VPS_CONTROL.sh
+.belastock/vps-task.sh
 ```
 
-O importador inicial migra `product`, `bss_print` e `bss_template`. O SQL legado contém ainda WooCommerce e outras tabelas, que devem permanecer somente como fonte de reconciliação até a migração ser validada.
+Mudanças de produção devem manter:
+
+1. backup antes da alteração;
+2. migrations idempotentes;
+3. `npm run check` aprovado;
+4. PM2 persistente;
+5. `nginx -t` aprovado;
+6. health local e público HTTP 200;
+7. validação de autenticação e isolamento.
 
 ## Testes
 
@@ -83,17 +168,40 @@ npm test
 npm run check
 ```
 
-## Endpoints iniciais
+Na versão 2.2, a suíte de produção validada possui testes para Supplier Gateway, normalização WooCommerce, cálculo de margem e catálogos de pagamentos/frete.
+
+## Endpoints principais
+
+Públicos:
 
 - `GET /health`
+- `GET /api/public/store`
 - `GET /api/public/home`
 - `GET /api/public/products`
-- `GET /api/admin/dashboard`
-- `GET/POST /api/admin/suppliers`
-- `POST /api/admin/suppliers/:id/test`
-- `POST /api/admin/suppliers/:id/sync`
-- `POST /api/admin/ai/run`
-- `GET /api/admin/ai/actions`
-- `POST /api/admin/ai/actions/:id/approve`
 
-Rotas administrativas exigem `Authorization: Bearer <ADMIN_TOKEN>`.
+Cliente:
+
+- `POST /api/customer/register`
+- `POST /api/customer/login`
+- `POST /api/customer/logout`
+- `GET /api/customer/panel`
+- `POST /api/customer/addresses`
+
+Parceiro:
+
+- `POST /api/partner/login`
+- `POST /api/partner/logout`
+- `GET /api/partner/panel`
+- gestão de catálogo próprio e Bela Stock;
+- configuração de gateways e transportadoras do tenant.
+
+Super Admin:
+
+- tenants e domínios;
+- usuários de parceiros;
+- catálogo e fornecedores;
+- Supplier Gateway e simulador;
+- regras de pagamento/frete;
+- IA e auditoria.
+
+Rotas administrativas exigem autenticação válida e ações sensíveis permanecem auditáveis.
