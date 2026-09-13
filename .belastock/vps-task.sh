@@ -11,34 +11,27 @@ echo " HOST=$(hostname)"
 echo " DATE=$(date -Is)"
 echo "============================================================"
 
-# O raw.githubusercontent pode manter cache de poucos minutos. Atualiza o
-# controlador root ate confirmar que a versao nova (capaz de criar somente o
-# DB canonical comprovadamente ausente) chegou na VPS.
 CONTROL_OK=0
 for attempt in {1..12}; do
   echo "[CONTROL] tentativa $attempt/12"
   sudo -n "$CONTROL" refresh-control
-  if grep -q 'Banco Node canonical' "$CONTROL"; then
+  if grep -q 'conta legada nao autenticou; criando usuario dedicado limpo' "$CONTROL"; then
     CONTROL_OK=1
-    echo "[CONTROL] versao nova confirmada"
+    echo "[CONTROL] revisao DB-FALLBACK confirmada"
     break
   fi
-  echo "[CONTROL] CDN ainda entregou versao anterior; aguardando 20s"
+  echo "[CONTROL] CDN ainda entregou revisao anterior; aguardando 20s"
   sleep 20
 done
 test "$CONTROL_OK" = "1"
 
 sudo -n "$CONTROL" backup-site
-
 chmod o+rx "$ROOT" "$ROOT/deploy" "$ROOT/deploy/runtime" "$ROOT/deploy/runtime/supplier-gateway" 2>/dev/null || true
 find "$ROOT/deploy/runtime/supplier-gateway" -type d -exec chmod o+rx {} +
 find "$ROOT/deploy/runtime/supplier-gateway" -type f -exec chmod o+r {} +
 chmod o+rx "$ROOT/deploy/APPLY_SUPPLIER_GATEWAY_V21.sh"
 
 sudo -n -u lojabelastock -H bash "$ROOT/deploy/APPLY_SUPPLIER_GATEWAY_V21.sh"
-
-# Agora o controlador: autentica no CloudPanel, cria belastock_node somente se
-# ausente, configura o usuario dedicado, migra, testa, sobe PM2 e valida Nginx.
 sudo -n "$CONTROL" runtime-repair
 
 echo "===== VALIDACAO FINAL ====="
