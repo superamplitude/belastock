@@ -313,14 +313,19 @@ case "$cmd" in
   pm2-restart)
     pm2_user restart belastock --update-env
     pm2_user save
-    restart_ok=0
+    restart_stable=0
     for i in $(seq 1 30); do
-      if health_local >/dev/null 2>&1; then restart_ok=1; break; fi
+      if health_local >/dev/null 2>&1; then
+        restart_stable=$((restart_stable + 1))
+        if [ "$restart_stable" -ge 3 ]; then break; fi
+      else
+        restart_stable=0
+      fi
       sleep 1
     done
-    if [ "$restart_ok" != 1 ]; then
+    if [ "$restart_stable" -lt 3 ]; then
       pm2_user logs belastock --nostream --lines 120 || true
-      fail "Aplicacao nao recuperou health apos restart PM2."
+      fail "Aplicacao nao atingiu health estavel apos restart PM2."
     fi
     health_local
     ;;
