@@ -14,9 +14,11 @@ echo " HOST=$(hostname)"
 echo " DATE=$(date -Is)"
 echo "============================================================"
 
-# 1. Runtime e banco sem alterar producao
+# 1. Runtime e banco; atualizar controlador validado antes do reparo de persistencia
 sudo -n "$CONTROL" db-test
 sudo -n "$CONTROL" health
+sudo -n "$CONTROL" refresh-control
+sudo -n "$CONTROL" pm2-service-ensure
 sudo -n "$CONTROL" status
 
 PKG_VERSION="$(node -p "require('$SITE/package.json').version")"
@@ -29,9 +31,9 @@ ENV_OWNER="$(stat -c '%U:%G' "$SITE/.env")"
 echo "ENV_MODE=$ENV_MODE"
 echo "ENV_OWNER=$ENV_OWNER"
 test "$ENV_OWNER" = "lojabelastock:lojabelastock"
-case "$ENV_MODE" in ???0|??0) ;; esac
 WORLD_DIGIT="${ENV_MODE: -1}"
 test "$WORLD_DIGIT" = "0"
+echo "ENV_WORLD_ACCESS=NONE"
 
 systemctl is-active --quiet pm2-lojabelastock
 echo "PM2_SYSTEMD_ACTIVE=YES"
