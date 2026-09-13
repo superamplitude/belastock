@@ -201,14 +201,56 @@ CREATE TABLE IF NOT EXISTS shipments (
   CONSTRAINT fk_shipment_carrier FOREIGN KEY (shipping_carrier_id) REFERENCES shipping_carriers(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-ALTER TABLE products ADD COLUMN IF NOT EXISTS owner_tenant_id BIGINT UNSIGNED NOT NULL DEFAULT 1 AFTER id;
-ALTER TABLE orders ADD COLUMN IF NOT EXISTS tenant_id BIGINT UNSIGNED NOT NULL DEFAULT 1 AFTER id;
-ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_id BIGINT UNSIGNED NULL AFTER tenant_id;
-ALTER TABLE conversations ADD COLUMN IF NOT EXISTS tenant_id BIGINT UNSIGNED NOT NULL DEFAULT 1 AFTER id;
+-- MySQL/MariaDB production compatibility: this host does not accept
+-- ALTER TABLE ... ADD COLUMN/INDEX IF NOT EXISTS. Build idempotence explicitly.
+SET @sql = IF(
+  (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='products' AND COLUMN_NAME='owner_tenant_id')=0,
+  'ALTER TABLE `products` ADD COLUMN `owner_tenant_id` BIGINT UNSIGNED NOT NULL DEFAULT 1 AFTER `id`',
+  'SELECT 1'
+);
+PREPARE bs_stmt FROM @sql; EXECUTE bs_stmt; DEALLOCATE PREPARE bs_stmt;
 
-ALTER TABLE products ADD INDEX IF NOT EXISTS idx_products_owner_tenant (owner_tenant_id,status);
-ALTER TABLE orders ADD INDEX IF NOT EXISTS idx_orders_tenant_status (tenant_id,status,created_at);
-ALTER TABLE conversations ADD INDEX IF NOT EXISTS idx_conversations_tenant (tenant_id,status,updated_at);
+SET @sql = IF(
+  (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='orders' AND COLUMN_NAME='tenant_id')=0,
+  'ALTER TABLE `orders` ADD COLUMN `tenant_id` BIGINT UNSIGNED NOT NULL DEFAULT 1 AFTER `id`',
+  'SELECT 1'
+);
+PREPARE bs_stmt FROM @sql; EXECUTE bs_stmt; DEALLOCATE PREPARE bs_stmt;
+
+SET @sql = IF(
+  (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='orders' AND COLUMN_NAME='customer_id')=0,
+  'ALTER TABLE `orders` ADD COLUMN `customer_id` BIGINT UNSIGNED NULL AFTER `tenant_id`',
+  'SELECT 1'
+);
+PREPARE bs_stmt FROM @sql; EXECUTE bs_stmt; DEALLOCATE PREPARE bs_stmt;
+
+SET @sql = IF(
+  (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='conversations' AND COLUMN_NAME='tenant_id')=0,
+  'ALTER TABLE `conversations` ADD COLUMN `tenant_id` BIGINT UNSIGNED NOT NULL DEFAULT 1 AFTER `id`',
+  'SELECT 1'
+);
+PREPARE bs_stmt FROM @sql; EXECUTE bs_stmt; DEALLOCATE PREPARE bs_stmt;
+
+SET @sql = IF(
+  (SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='products' AND INDEX_NAME='idx_products_owner_tenant')=0,
+  'ALTER TABLE `products` ADD INDEX `idx_products_owner_tenant` (`owner_tenant_id`,`status`)',
+  'SELECT 1'
+);
+PREPARE bs_stmt FROM @sql; EXECUTE bs_stmt; DEALLOCATE PREPARE bs_stmt;
+
+SET @sql = IF(
+  (SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='orders' AND INDEX_NAME='idx_orders_tenant_status')=0,
+  'ALTER TABLE `orders` ADD INDEX `idx_orders_tenant_status` (`tenant_id`,`status`,`created_at`)',
+  'SELECT 1'
+);
+PREPARE bs_stmt FROM @sql; EXECUTE bs_stmt; DEALLOCATE PREPARE bs_stmt;
+
+SET @sql = IF(
+  (SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='conversations' AND INDEX_NAME='idx_conversations_tenant')=0,
+  'ALTER TABLE `conversations` ADD INDEX `idx_conversations_tenant` (`tenant_id`,`status`,`updated_at`)',
+  'SELECT 1'
+);
+PREPARE bs_stmt FROM @sql; EXECUTE bs_stmt; DEALLOCATE PREPARE bs_stmt;
 
 INSERT INTO tenant_product_listings (tenant_id,product_id,source_mode,enabled,store_name,store_slug)
 SELECT 1,id,'platform',1,name,slug FROM products
