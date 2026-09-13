@@ -1,62 +1,105 @@
 # Bela Stock AI Commerce — Status de Produção
 
-**Versão ativa:** `2.2.0`  
+**Versão ativa:** `3.0.0`  
 **Domínio canônico:** `https://belastock.com.br`  
 **Runtime:** Node.js + Fastify + MySQL + PM2  
 **Porta interna canônica:** `127.0.0.1:3210`  
 **Deploy/controle:** GitHub Actions self-hosted runner na VPS
 
-## Produção verificada
+## Fechamento interno
 
-- Banco `belastock_node` autenticado pelo mesmo driver `mysql2` usado pela aplicação.
-- Migrations `001` a `005` aplicadas.
-- PM2 ativo sob o usuário `lojabelastock` e persistido via systemd.
-- Nginx canônico corrigido para `127.0.0.1:3210`.
-- `/`, `/health`, `/cliente`, `/parceiro`, `/admin` e `/api/public/store` respondendo HTTP 200.
-- `www.belastock.com.br` redirecionando com HTTP 301 para o domínio canônico.
-- Fronteiras privadas de cliente, parceiro e super admin respondendo HTTP 401 sem autenticação.
-- Suite `npm run check`: 7/7 testes aprovados.
+A Bela Stock 3.0 está publicada e validada em produção com o fluxo interno completo de comércio, operação e processamento.
 
-## Núcleos ativos
+- banco `belastock_node` autenticado pelo driver `mysql2` usado pela aplicação;
+- migrations `001` a `006` aplicadas;
+- PM2 `belastock` online como versão `3.0.0` e persistido;
+- Nginx canônico em `127.0.0.1:3210`;
+- `/`, `/health`, `/admin`, `/cliente`, `/parceiro`, `/storefront.js`, `/operations.js`, `/api/public/store` e `/api/public/products` respondendo HTTP 200;
+- `www.belastock.com.br` redirecionando HTTP 301 para o domínio canônico;
+- fronteiras privadas de cliente, parceiro e Super Admin respondendo HTTP 401 sem autenticação;
+- suíte `npm run check`: **11/11 testes aprovados, 0 falhas**;
+- teste sintético end-to-end concluído e removido integralmente após a prova.
 
-- Supplier Gateway desacoplado do catálogo interno.
-- Adaptador WooCommerce para fornecedores, sem transformar Bela Stock em WordPress/WooCommerce.
-- Simulador/pré-importação de fornecedor.
-- Multi-store / white-label por tenant e domínio.
-- Painel do Cliente.
-- Painel do Parceiro.
-- Super Admin.
-- Catálogo de gateways: Mercado Pago, PagBank, Pagar.me, Stripe e PIX manual.
-- Catálogo de frete: Correios, Melhor Envio, Frenet, Jadlog, transportadora própria, fulfillment do fornecedor e retirada.
-- Regras de frete por produto, incluindo exigência de transportadora, peso e dimensões.
+## Fluxo comercial validado
 
-## Estrutura multi-tenant verificada
+O teste de produção criou dados descartáveis e comprovou:
 
-14 tabelas obrigatórias verificadas em produção, incluindo tenants, domínios, usuários de parceiro, listagens de produtos, gateways, transportadoras, clientes, endereços, transações, remessas, sessões e assinaturas.
+`Produto publicado → Cliente → Carrinho → Cotação → Checkout → Pedido → Pagamento → Processamento → Conclusão`
 
-Tenant raiz verificado:
+Também foi comprovada a reserva de estoque e a limpeza dos dados sintéticos depois do teste.
 
-- `id=1`
-- `code=belastock`
-- `status=active`
-- `plan_code=platform`
-- domínio primário `belastock.com.br`
-- SSL ativo
+## Estampas e mockups
 
-## Gateways e transportadoras
+Fluxo operacional ativo:
 
-Os provedores estão registrados na arquitetura e disponíveis para configuração por tenant. Operações financeiras e cotações reais de provedores externos só devem ser ativadas quando existirem credenciais válidas da conta correspondente e validação em sandbox/produção.
+`Biblioteca → Fila de Processamento → Processadas → Publicadas`
 
-## Evidência de fechamento
+Regras ativas e testadas:
 
-Workflow de produção GitHub Actions **run 24** concluído com sucesso em 2026-09-13, com os marcadores:
+- original preservado;
+- item não sai da fila sem composição/mockup ativo;
+- item não sai da fila sem código de posicionamento travado;
+- código de posicionamento persistente e não renomeado automaticamente;
+- histórico de transições;
+- remoção de imagem de mockup persistindo no banco e permanecendo removida após nova leitura.
+
+## Super Admin
+
+O painel administra:
+
+- produtos, preços, status, variações e estoque;
+- Biblioteca/Fila/Processadas/Publicadas;
+- arquivos de estampa e códigos de posicionamento;
+- mockups;
+- pedidos e confirmação de pagamentos;
+- lojas white-label, domínios e usuários;
+- fornecedores e Supplier Gateway;
+- simulador/pré-importação;
+- pagamentos e transportadoras;
+- relatórios;
+- rascunhos de marketing;
+- Central de IA.
+
+## Multi-store / white-label
+
+A estrutura multi-tenant permanece ativa para tenants, domínios, usuários, listagens, clientes, pedidos, pagamentos, frete, sessões e assinaturas. O tenant raiz é `belastock`, domínio primário `belastock.com.br`, status `active`.
+
+## Pagamento e frete
+
+O caminho interno funcional usa:
+
+- `manual_pix` — PIX manual;
+- `pickup` — retirada no local.
+
+A arquitetura também registra Mercado Pago, PagBank, Pagar.me, Stripe, Correios, Melhor Envio, Frenet, Jadlog, transportadora própria e fulfillment do fornecedor.
+
+**Dependência externa:** provedores que movimentam dinheiro ou consultam transportadoras externas não são declarados como ativos sem credenciais reais da conta correspondente e validação sandbox/produção. O código está preparado para configuração por tenant; credenciais não são inventadas nem embutidas no repositório.
+
+## Evidência final
+
+Workflow de produção GitHub Actions **run 29**, concluído com `success` em 2026-09-13.
 
 ```text
-BELA_STOCK_22_MULTISTORE=100%_OK
-BELA_STOCK_22_CUSTOMER_PANEL=100%_OK
-BELA_STOCK_22_PARTNER_PANEL=100%_OK
-BELA_STOCK_22_PAYMENTS_ARCHITECTURE=100%_OK
-BELA_STOCK_22_SHIPPING_ARCHITECTURE=100%_OK
-BELA_STOCK_22_SUPPLIER_GATEWAY=100%_OK
-EXECUCAO_TOTAL_BELASTOCK_22=CONCLUIDA
+PACKAGE_VERSION=3.0.0
+DB_AUTH_MYSQL2=OK
+BELA_STOCK_V30_E2E=100%_OK
+E2E_SYNTHETIC_DATA_CLEANUP=OK
+V30_REQUIRED_TABLES=10
+V30_MISSING_TABLES=
+MIGRATION_006_EFFECT=100%_OK
+SCHEMA_MIGRATIONS_TOTAL=6
+E2E_RESIDUE={"products":0,"customers":0,"prints":0}
+VHOST_PROXY=proxy_pass http://127.0.0.1:3210/;
+BELA_STOCK_V30_RUNTIME=100%_OK
+BELA_STOCK_V30_DATABASE=100%_OK
+BELA_STOCK_V30_STOREFRONT=100%_OK
+BELA_STOCK_V30_CART_CHECKOUT=100%_OK
+BELA_STOCK_V30_ORDERS=100%_OK
+BELA_STOCK_V30_PRINT_WORKFLOW=100%_OK
+BELA_STOCK_V30_MOCKUP_PERSISTENCE=100%_OK
+BELA_STOCK_V30_MULTISTORE=100%_OK
+BELA_STOCK_V30_SUPPLIER_GATEWAY=100%_OK
+BELA_STOCK_V30_INTERNAL_PROCESS=100%_OK
+EXTERNAL_PROVIDERS=READY_FOR_CREDENTIALS
+EXECUCAO_TOTAL_BELASTOCK_V30=CONCLUIDA
 ```
