@@ -98,12 +98,22 @@ try{
   const weakExternalGateways=await scalar(`SELECT COUNT(*) c FROM payment_gateways WHERE tenant_id=1 AND enabled=1 AND provider<>'manual_pix' AND (credentials_encrypted IS NULL OR LENGTH(credentials_encrypted)<20)`);
   if(weakExternalGateways) fail('enabled_external_gateway_without_credentials',String(weakExternalGateways)); else ok('enabled_external_gateway_credentials','no invalid enabled external gateway');
 
+  const weakExternalCarriers=await scalar(`SELECT COUNT(*) c FROM shipping_carriers WHERE tenant_id=1 AND enabled=1 AND provider NOT IN ('pickup','supplier','custom') AND (credentials_encrypted IS NULL OR LENGTH(credentials_encrypted)<20)`);
+  if(weakExternalCarriers) fail('enabled_external_carrier_without_credentials',String(weakExternalCarriers)); else ok('enabled_external_carrier_credentials','no invalid enabled external carrier');
+
   const adminToken=env.ADMIN_TOKEN||'';
   if(adminToken.length<32) fail('admin_token_strength',`length=${adminToken.length}`); else ok('admin_token_strength',`length=${adminToken.length}`);
 
-  const secretCandidates=['CREDENTIALS_ENCRYPTION_KEY','ENCRYPTION_KEY','APP_KEY'];
-  const activeSecret=secretCandidates.find(k=>(env[k]||'').length>=32);
-  if(!activeSecret) fail('encryption_secret','no >=32-char encryption key found'); else ok('encryption_secret',activeSecret);
+  const masterKey=env.CREDENTIALS_MASTER_KEY||'';
+  let decodedLength=0;
+  try{ decodedLength=Buffer.from(masterKey,'base64').length; }catch{}
+  if(decodedLength!==32) fail('credentials_master_key',`decoded_bytes=${decodedLength}`); else ok('credentials_master_key','base64 -> 32 bytes');
+
+  if((env.NODE_ENV||'').toLowerCase()!=='production') fail('node_env',env.NODE_ENV||'missing'); else ok('node_env','production');
+  if((env.HOST||'')!=='127.0.0.1') fail('bind_host',env.HOST||'missing'); else ok('bind_host','127.0.0.1');
+  if(String(env.PORT||'')!=='3210') fail('bind_port',env.PORT||'missing'); else ok('bind_port','3210');
+  if(!/^https:\/\/belastock\.com\.br\/?$/i.test(env.APP_URL||'')) fail('app_url',env.APP_URL||'missing'); else ok('app_url','canonical https');
+  if((env.AI_PROVIDER||'disabled')!=='disabled' && !(env.AI_API_KEY||'').trim()) fail('ai_provider_key','provider enabled without key'); else ok('ai_provider_key','consistent');
 
   console.log(`FINAL_DB_ADVERSARIAL_FAILURES=${failures}`);
   if(failures) process.exitCode=20;
