@@ -1,2 +1,2 @@
 execute
-# final-v30-proof-20260913-0220
+# second-pass-adversarial-audit-20260913-1037
