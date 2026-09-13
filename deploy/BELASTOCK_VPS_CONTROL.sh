@@ -11,6 +11,7 @@ VHOST="/etc/nginx/sites-enabled/belastock.com.br.conf"
 PM2_HOME_DIR="/home/${APP_USER}/.pm2"
 PM2_LOCAL="/home/${APP_USER}/.local/bin/pm2"
 PM2_SERVICE="/etc/systemd/system/pm2-${APP_USER}.service"
+PM2_UNIT="pm2-${APP_USER}"
 BACKUP_BASE="/root/BELASTOCK_BRIDGE_BACKUPS"
 CONTROL_URL="https://raw.githubusercontent.com/superamplitude/belastock/main/deploy/BELASTOCK_VPS_CONTROL.sh"
 CONTROL_DST="/usr/local/sbin/belastock-vps-control"
@@ -31,6 +32,68 @@ health_origin(){ local c; c="$(curl -ksS --resolve "${DOMAIN}:443:127.0.0.1" --m
 node_db_ok(){
   local h="$1" p="$2" u="$3" pass="$4" dbname="$5"
   sudo -u "$APP_USER" -H env DBT_HOST="$h" DBT_PORT="$p" DBT_USER="$u" DBT_PASS="$pass" DBT_NAME="$dbname" bash -lc "cd '$SITE' && node --input-type=module -e \"import mysql from 'mysql2/promise'; const c=await mysql.createConnection({host:process.env.DBT_HOST,port:Number(process.env.DBT_PORT),user:process.env.DBT_USER,password:process.env.DBT_PASS,database:process.env.DBT_NAME}); await c.query('SELECT 1'); await c.end();\"" >/dev/null 2>&1
+}
+
+write_pm2_service(){
+  cat > "$PM2_SERVICE" <<EOF
+[Unit]
+Description=PM2 Bela Stock
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=forking
+User=$APP_USER
+Environment=HOME=/home/$APP_USER
+Environment=PM2_HOME=$PM2_HOME_DIR
+Environment=PATH=/home/$APP_USER/.local/bin:/usr/local/bin:/usr/bin:/bin
+PIDFile=$PM2_HOME_DIR/pm2.pid
+ExecStart=$PM2_LOCAL resurrect
+ExecReload=$PM2_LOCAL reload all
+ExecStop=$PM2_LOCAL kill
+Restart=on-failure
+RestartSec=3
+TimeoutStartSec=60
+TimeoutStopSec=30
+[Install]
+WantedBy=multi-user.target
+EOF
+  chmod 0644 "$PM2_SERVICE"
+  systemctl daemon-reload
+}
+
+pm2_service_ensure(){
+  [ -x "$PM2_LOCAL" ] || fail "PM2 local ausente: $PM2_LOCAL"
+  local stamp backup
+  stamp="$(date +%Y%m%d_%H%M%S)"
+  if [ -f "$PM2_SERVICE" ]; then
+    backup="$BACKUP_BASE/pm2-service-${stamp}.service"
+    cp -a "$PM2_SERVICE" "$backup"
+    chmod 600 "$backup"
+    echo "PM2_SERVICE_BACKUP=$backup"
+  fi
+  pm2_user save >/dev/null
+  write_pm2_service
+  systemctl enable "$PM2_UNIT" >/dev/null
+  if ! systemctl is-active --quiet "$PM2_UNIT"; then
+    systemctl reset-failed "$PM2_UNIT" >/dev/null 2>&1 || true
+    if ! systemctl start "$PM2_UNIT"; then
+      echo "PM2_SYSTEMD_FIRST_START=FAILED"
+      systemctl status "$PM2_UNIT" --no-pager -l || true
+      echo "PM2_SYSTEMD_REOWN=BEGIN"
+      pm2_user save >/dev/null || true
+      pm2_user kill >/dev/null 2>&1 || true
+      systemctl reset-failed "$PM2_UNIT" >/dev/null 2>&1 || true
+      systemctl start "$PM2_UNIT"
+    fi
+  fi
+  systemctl is-enabled --quiet "$PM2_UNIT" || fail "Servico PM2 nao ficou habilitado."
+  systemctl is-active --quiet "$PM2_UNIT" || { systemctl status "$PM2_UNIT" --no-pager -l || true; fail "Servico PM2 nao ficou ativo."; }
+  echo "PM2_SYSTEMD_ENABLED=YES"
+  echo "PM2_SYSTEMD_ACTIVE=YES"
+  pm2_user status
+  for i in {1..30}; do health_local >/dev/null 2>&1 && break; sleep 1; done
+  health_local || fail "Aplicacao nao recuperou health apos ownership pelo systemd."
+  ok "PM2_SYSTEMD_PERSISTENCE=100%_OK"
 }
 
 MASTER_HOST=""; MASTER_PORT=""; MASTER_USER=""; MASTER_PASS=""
@@ -137,25 +200,7 @@ runtime_repair(){
   pm2_user save
 
   echo "[6/7] Persistencia"
-  cat > "$PM2_SERVICE" <<EOF
-[Unit]
-Description=PM2 Bela Stock
-After=network.target mariadb.service mysql.service
-Wants=network-online.target
-[Service]
-Type=forking
-User=$APP_USER
-Environment=PM2_HOME=$PM2_HOME_DIR
-Environment=PATH=/home/$APP_USER/.local/bin:/usr/local/bin:/usr/bin:/bin
-PIDFile=$PM2_HOME_DIR/pm2.pid
-ExecStart=$PM2_LOCAL resurrect
-ExecReload=$PM2_LOCAL reload all
-ExecStop=$PM2_LOCAL kill
-Restart=on-failure
-[Install]
-WantedBy=multi-user.target
-EOF
-  systemctl daemon-reload; systemctl enable "pm2-$APP_USER" >/dev/null
+  pm2_service_ensure
 
   echo "[7/7] Health"
   for i in {1..40}; do health_local >/dev/null 2>&1 && break; sleep 1; done
@@ -205,8 +250,6 @@ nginx_repair(){
   systemctl reload nginx
   systemctl is-active --quiet nginx || { cp -a "$backup" "$VHOST"; nginx -t && systemctl reload nginx; fail "Nginx nao permaneceu ativo; rollback aplicado."; }
 
-  # Reload do nginx e gracioso: workers antigos podem atender por instantes.
-  # Nao declarar falha/rollback em uma unica requisicao imediatamente apos HUP.
   origin_ok=0
   for i in $(seq 1 30); do
     code="$(curl -ksS --resolve "${DOMAIN}:443:127.0.0.1" --max-time 5 -o /tmp/bs-health-origin.json -w '%{http_code}' "https://${DOMAIN}/health?reload=${i}-$(date +%s%N)" || true)"
@@ -249,6 +292,7 @@ nginx_repair(){
 cmd="${1:-status}"
 case "$cmd" in
   runtime-repair) runtime_repair ;;
+  pm2-service-ensure) pm2_service_ensure ;;
   health) health_local; health_origin ;;
   db-test)
     h="$(get_env DB_HOST)"; h="${h:-127.0.0.1}"; p="$(get_env DB_PORT)"; p="${p:-3306}"; u="$(get_env DB_USER)"; pass="$(get_env DB_PASSWORD)"; d="$(get_env DB_NAME)"
@@ -258,7 +302,7 @@ case "$cmd" in
   nginx-repair) nginx_repair ;;
   status)
     echo "BELASTOCK_SITE=$SITE BELASTOCK_PORT=$APP_PORT HOST=$(hostname) DATE=$(date -Is)"; echo "NODE=$(node -v 2>/dev/null || echo ausente) NPM=$(npm -v 2>/dev/null || echo ausente) PM2=$(pm2_bin)"
-    nginx -t; systemctl is-active nginx || true; ss -lntp | grep -E ":(80|443|${APP_PORT})[[:space:]]" || true; pm2_user status || true; health_local || true; health_origin || true
+    nginx -t; systemctl is-active nginx || true; ss -lntp | grep -E ":(80|443|${APP_PORT})[[:space:]]" || true; pm2_user status || true; systemctl is-enabled "$PM2_UNIT" 2>/dev/null || true; systemctl is-active "$PM2_UNIT" 2>/dev/null || true; health_local || true; health_origin || true
     ;;
   inventory) echo "=== SITE ==="; ls -la "$SITE" | head -100; echo "=== VHOST ==="; grep -nE 'server_name|proxy_pass|root |listen ' "$VHOST" 2>/dev/null || true; echo "=== PORTS ==="; ss -lntup || true ;;
   backup-site) stamp="$(date +%Y%m%d_%H%M%S)"; out="$BACKUP_BASE/site-${stamp}.tar.gz"; tar -C "$(dirname "$SITE")" -czf "$out" "$(basename "$SITE")"; chmod 600 "$out"; echo "BACKUP=$out" ;;
