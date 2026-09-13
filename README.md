@@ -6,7 +6,7 @@ Plataforma nativa em **Node.js + Fastify + MySQL**, independente de WordPress. W
 
 Produção canônica: `https://belastock.com.br`
 
-A versão `3.0.0` está publicada e validada na VPS pelo runner self-hosted do GitHub Actions. O workflow de fechamento **run 29** terminou com sucesso, incluindo teste sintético de ponta a ponta e limpeza posterior. Consulte `STATUS.md` para a prova operacional completa.
+A versão `3.0.0` está publicada, endurecida e validada na VPS pelo runner self-hosted do GitHub Actions. A auditoria adversarial final e a auditoria reutilizável do estado corrente terminaram com sucesso; consulte `STATUS.md` para evidências, runs e pendências externas reais.
 
 ## Núcleo ativo
 
@@ -26,6 +26,21 @@ A versão `3.0.0` está publicada e validada na VPS pelo runner self-hosted do G
 - relatórios;
 - rascunhos de marketing;
 - Central de IA e trilha de auditoria.
+
+## Segurança de produção
+
+- runtime Node exposto somente em `127.0.0.1:3210` atrás do Nginx;
+- PM2 persistido e controlado por `systemd`;
+- controlador de restart exige health estável antes de declarar sucesso;
+- `.env` modo `640`, sem leitura para outros usuários;
+- credenciais externas protegidas pelo contrato `CREDENTIALS_MASTER_KEY` / AES-256-GCM;
+- headers de segurança no Nginx;
+- TLS válido e monitorado;
+- `@fastify/rate-limit@11.2.0` nas rotas de cadastro/login;
+- login de cliente e parceiro limitado a 8 tentativas por minuto;
+- cadastro de cliente limitado a 5 tentativas em 10 minutos;
+- rate limit comprovado em produção por HTTP `429` na nona tentativa inválida de login;
+- `npm audit --omit=dev --audit-level=high` sem vulnerabilidades na auditoria final.
 
 ## Estampas e mockups
 
@@ -123,7 +138,7 @@ Super Admin:
 
 ## Banco e migrations
 
-Produção está em `001` a `006`. A `006_end_to_end_completion.sql` adiciona carrinhos, itens de carrinho, snapshot de endereço do pedido, histórico de pedido, webhooks, workflow de estampas, ativos de estampas, códigos de posicionamento e jobs de marketing.
+Produção está em `001` a `006`. A auditoria final validou 43/43 tabelas obrigatórias, seis migrations registradas, ausência de órfãos nas relações críticas, ausência de duplicidades críticas e ausência de resíduos dos E2E sintéticos.
 
 ## Produção
 
@@ -143,7 +158,7 @@ O Nginx publica HTTPS e o PM2 mantém o runtime Node ativo sob o usuário `lojab
 
 ## Deploy e controle
 
-A ponte de produção usa GitHub Actions com runner self-hosted na VPS. Mudanças de produção preservam backup, migrations idempotentes, testes, PM2, `nginx -t`, health e validações de autenticação.
+A ponte de produção usa GitHub Actions com runner self-hosted na VPS. O token normal do workflow opera com `contents: read`; alterações de produção preservam backup, rollback, migrations idempotentes, testes, PM2/systemd, `nginx -t`, health e validações de autenticação.
 
 Arquivos principais:
 
@@ -151,8 +166,10 @@ Arquivos principais:
 .github/workflows/belastock-vps-bridge.yml
 deploy/BELASTOCK_VPS_CONTROL.sh
 deploy/APPLY_COMPLETION_V30.sh
+deploy/APPLY_SECURITY_HARDENING_V30.sh
 .belastock/vps-task.sh
 .belastock/validate-v30-e2e.mjs
+.belastock/final-adversarial-audit.mjs
 ```
 
 ## Testes
@@ -162,7 +179,7 @@ npm test
 npm run check
 ```
 
-A suíte validada da 3.0 possui **11 testes, 11 aprovados, 0 falhas**. Além da suíte unitária/estrutural, o deploy final executou um E2E descartável:
+A suíte validada da 3.0 possui **11 testes, 11 aprovados, 0 falhas**. Além da suíte unitária/estrutural, o deploy executou E2E descartável:
 
 ```text
 produto -> cliente -> carrinho -> cotação -> checkout
@@ -170,3 +187,7 @@ produto -> cliente -> carrinho -> cotação -> checkout
 ```
 
 O mesmo E2E validou o fluxo `Biblioteca -> Fila -> Processadas -> Publicadas`, a trava obrigatória e a persistência da exclusão de imagem de mockup. Os dados sintéticos foram removidos ao final.
+
+## Estado comercial
+
+A plataforma está tecnicamente aprovada, porém o catálogo real ainda precisa ser populado. Na última auditoria não havia produtos publicados, fornecedores ativos, pedidos ou clientes reais. Gateways/transportadoras externos permanecem condicionados às credenciais reais e validação de cada conta.
