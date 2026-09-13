@@ -1,2 +1,2 @@
-execute
-# deploy-rate-limit-and-final-proof-20260913-1904
+health
+# verify-post-security-restart-20260913-1906
