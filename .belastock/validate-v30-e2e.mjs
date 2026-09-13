@@ -11,7 +11,7 @@ for(const raw of envText.split(/\r?\n/)){
   if(process.env[key]===undefined)process.env[key]=value;
 }
 
-const load=rel=>import(pathToFileURL(`${site}/${rel}`).href+`?e2e=${Date.now()}-${Math.random()}`);
+const load=rel=>import(pathToFileURL(`${site}/${rel}`).href);
 const {db}=await load('src/db.mjs');
 const {createAdminProduct,listVariants}=await load('src/commerce/catalog-admin-service.mjs');
 const {registerCustomer,loginCustomer,logoutCustomer}=await load('src/commerce/customer-service.mjs');
