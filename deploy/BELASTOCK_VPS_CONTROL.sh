@@ -160,8 +160,8 @@ EOF
   echo "[7/7] Health"
   for i in {1..40}; do health_local >/dev/null 2>&1 && break; sleep 1; done
   health_local || { pm2_user logs belastock --nostream --lines 160 || true; fail "Aplicacao nao respondeu na porta $APP_PORT."; }
-  nginx -t; systemctl reload nginx; health_origin || fail "Origem HTTPS nao respondeu 200."
-  ok "RUNTIME_BELASTOCK=100%_OK"
+  nginx -t; systemctl reload nginx
+  ok "RUNTIME_BELASTOCK=LOCAL_100%_OK"
 }
 
 nginx_diagnose(){
@@ -177,10 +177,10 @@ nginx_diagnose(){
 }
 
 nginx_repair(){
-  echo "BELASTOCK_NGINX_REPAIR_V1"
+  echo "BELASTOCK_NGINX_REPAIR_V2"
   [ -f "$VHOST" ] || fail "Vhost Bela Stock ausente: $VHOST"
   health_local || fail "App local nao esta saudavel em 127.0.0.1:${APP_PORT}."
-  local stamp backup old_count new_count origin_root public_health www_code www_location
+  local stamp backup old_count new_count origin_root public_health www_code www_location origin_ok code i
   stamp="$(date +%Y%m%d_%H%M%S)"; backup="$BACKUP_BASE/belastock-vhost-${stamp}.conf"
   cp -a "$VHOST" "$backup"; chmod 600 "$backup"; echo "VHOST_BACKUP=$backup"
 
@@ -195,15 +195,38 @@ nginx_repair(){
     sed -i "s#proxy_pass http://127.0.0.1:3003/;#proxy_pass http://127.0.0.1:${APP_PORT}/;#" "$VHOST"
     echo "VHOST_CHANGE=3003_TO_${APP_PORT}"
   else
-    fail "Estado de upstream inesperado; rollback nao necessario porque nenhuma alteracao foi aplicada."
+    fail "Estado de upstream inesperado; nenhuma alteracao aplicada."
   fi
 
   grep -q "proxy_pass http://127.0.0.1:${APP_PORT}/;" "$VHOST" || { cp -a "$backup" "$VHOST"; fail "Upstream canonical nao persistiu; vhost restaurado."; }
-  if ! nginx -t; then cp -a "$backup" "$VHOST"; nginx -t || true; fail "nginx -t rejeitou a configuracao; vhost restaurado."; fi
+  nginx -t || { cp -a "$backup" "$VHOST"; nginx -t || true; fail "nginx -t rejeitou a configuracao; vhost restaurado."; }
+
+  echo "NGINX_EFFECTIVE_PROXY_BEFORE_RELOAD=$(grep -Eo 'proxy_pass[[:space:]]+http://127\.0\.0\.1:[0-9]+/' "$VHOST" | head -1)"
   systemctl reload nginx
   systemctl is-active --quiet nginx || { cp -a "$backup" "$VHOST"; nginx -t && systemctl reload nginx; fail "Nginx nao permaneceu ativo; rollback aplicado."; }
 
-  health_origin || { cp -a "$backup" "$VHOST"; nginx -t && systemctl reload nginx; fail "Origem continuou sem health 200; rollback aplicado."; }
+  # Reload do nginx e gracioso: workers antigos podem atender por instantes.
+  # Nao declarar falha/rollback em uma unica requisicao imediatamente apos HUP.
+  origin_ok=0
+  for i in $(seq 1 30); do
+    code="$(curl -ksS --resolve "${DOMAIN}:443:127.0.0.1" --max-time 5 -o /tmp/bs-health-origin.json -w '%{http_code}' "https://${DOMAIN}/health?reload=${i}-$(date +%s%N)" || true)"
+    echo "ORIGIN_RELOAD_CHECK_${i}=$code"
+    if [ "$code" = 200 ]; then origin_ok=1; break; fi
+    sleep 1
+  done
+
+  if [ "$origin_ok" != 1 ]; then
+    echo "===== FAILURE EVIDENCE BEFORE ROLLBACK ====="
+    echo "VHOST_PROXY_NOW=$(grep -Eo 'proxy_pass[[:space:]]+http://127\.0\.0\.1:[0-9]+/' "$VHOST" | head -1)"
+    ss -lntp | grep ":${APP_PORT}" || true
+    tail -n 60 "/home/$APP_USER/logs/nginx/error.log" 2>/dev/null || true
+    cp -a "$backup" "$VHOST"
+    nginx -t && systemctl reload nginx
+    fail "Origem permaneceu sem health 200 apos 30s; evidencia capturada e rollback aplicado."
+  fi
+
+  echo "ORIGIN_HEALTH_HTTP=200"
+  cat /tmp/bs-health-origin.json 2>/dev/null || true; echo
   origin_root="$(curl -ksS --resolve "${DOMAIN}:443:127.0.0.1" --max-time 15 -o /tmp/bs-origin-root.html -w '%{http_code}' "https://${DOMAIN}/" || true)"
   echo "ORIGIN_ROOT_HTTP=$origin_root"
   [[ "$origin_root" =~ ^(200|301|302)$ ]] || fail "Raiz da origem nao retornou 200/301/302."
