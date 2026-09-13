@@ -20,7 +20,7 @@ on:
       - '.belastock/bridge-command.txt'
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: belastock-vps-production
