@@ -1,2 +1,2 @@
-health
-# verify-post-security-restart-20260913-1906
+execute
+# final-post-hardening-production-audit-20260913-1908
