@@ -1,6 +1,19 @@
+import fs from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 
 const site = '/home/lojabelastock/htdocs/belastock.com.br';
+const envText = await fs.readFile(`${site}/.env`,'utf8');
+for (const raw of envText.split(/\r?\n/)) {
+  const line = raw.trim();
+  if (!line || line.startsWith('#')) continue;
+  const i = line.indexOf('=');
+  if (i <= 0) continue;
+  const key = line.slice(0,i).trim();
+  let value = line.slice(i+1).trim();
+  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1,-1);
+  if (process.env[key] === undefined) process.env[key] = value;
+}
+
 const { db } = await import(pathToFileURL(`${site}/src/db.mjs`).href);
 const { listPaymentProviders } = await import(pathToFileURL(`${site}/src/commerce/payment/registry.mjs`).href);
 const { listShippingProviders } = await import(pathToFileURL(`${site}/src/commerce/shipping/registry.mjs`).href);
