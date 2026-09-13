@@ -1,37 +1,61 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
-ROOT="$(pwd)"
-CONTROL="/usr/local/sbin/belastock-vps-control"
 SITE="/home/lojabelastock/htdocs/belastock.com.br"
-DB_AUDIT="$ROOT/.belastock/final-adversarial-audit.mjs"
 
 echo "============================================================"
-echo " BELA STOCK 3.0 - AUDITORIA DE PRODUCAO REUTILIZAVEL"
+echo " BELA STOCK - INSPECAO HERO/HOME SEM ALTERAR PRODUCAO"
 echo " HOST=$(hostname)"
 echo " DATE=$(date -Is)"
 echo "============================================================"
 
-sudo -n "$CONTROL" db-test
-sudo -n "$CONTROL" health
-sudo -n "$CONTROL" status
-systemctl is-active --quiet pm2-lojabelastock
-systemctl is-enabled --quiet pm2-lojabelastock
-sudo -n -u lojabelastock -H bash -lc "cd '$SITE' && npm run check && npm audit --omit=dev --audit-level=high"
-chmod o+r "$DB_AUDIT"
-sudo -n -u lojabelastock -H node "$DB_AUDIT"
+test -d "$SITE"
+cd "$SITE"
 
-for url in / /health /admin /cliente /parceiro /api/public/store /api/public/products; do
-  code="$(curl -ksS --max-time 20 -o /dev/null -w '%{http_code}' "https://belastock.com.br${url}" || true)"
-  echo "PUBLIC ${url}=$code"
-  test "$code" = 200
+echo "--- PACKAGE ---"
+node -e "const p=require('./package.json'); console.log(JSON.stringify({name:p.name,version:p.version,scripts:p.scripts},null,2))" || true
+
+echo "--- PUBLIC FILES ---"
+find public -maxdepth 2 -type f -printf '%p\n' | sort
+
+echo "--- HASHES ---"
+for f in public/index.html public/admin.html public/storefront.js public/app.js public/operations.js public/styles.css src/server.mjs src/commerce/completion-routes.mjs; do
+  if [ -f "$f" ]; then sha256sum "$f"; fi
 done
 
-ADMIN_CODE="$(curl -ksS --max-time 20 -o /dev/null -w '%{http_code}' https://belastock.com.br/api/admin/completion || true)"
-CUSTOMER_CODE="$(curl -ksS --max-time 20 -o /dev/null -w '%{http_code}' https://belastock.com.br/api/customer/panel || true)"
-PARTNER_CODE="$(curl -ksS --max-time 20 -o /dev/null -w '%{http_code}' https://belastock.com.br/api/partner/panel || true)"
-echo "PRIVATE admin=$ADMIN_CODE customer=$CUSTOMER_CODE partner=$PARTNER_CODE"
-test "$ADMIN_CODE" = 401
-test "$CUSTOMER_CODE" = 401
-test "$PARTNER_CODE" = 401
+echo "--- INDEX HERO ---"
+if [ -f public/index.html ]; then sed -n '1,180p' public/index.html; fi
 
-echo "BELA_STOCK_REUSABLE_PRODUCTION_AUDIT=100%_OK"
+echo "--- STOREFRONT HOME REFERENCES ---"
+if [ -f public/storefront.js ]; then grep -nE 'public/home|hero|topbar' public/storefront.js || true; fi
+
+echo "--- ADMIN HOME REFERENCES ---"
+if [ -f public/admin.html ]; then grep -nEi 'home|hero|banner|capa' public/admin.html || true; fi
+if [ -f public/app.js ]; then grep -nEi 'home|hero|banner|capa|settings' public/app.js || true; fi
+if [ -f public/operations.js ]; then grep -nEi 'home|hero|banner|capa|settings' public/operations.js || true; fi
+
+echo "--- SERVER HOME/SETTINGS REFERENCES ---"
+grep -RniE "api/public/home|setting_key|settings_json|home\." src 2>/dev/null | head -n 200 || true
+
+echo "--- DATABASE SETTINGS SCHEMA + HOME DATA ---"
+node --input-type=module <<'NODE'
+import 'dotenv/config';
+import mysql from 'mysql2/promise';
+const pool=mysql.createPool({
+  host:process.env.DB_HOST||'127.0.0.1',
+  port:Number(process.env.DB_PORT||3306),
+  user:process.env.DB_USER,
+  password:process.env.DB_PASSWORD,
+  database:process.env.DB_NAME,
+  connectionLimit:1
+});
+try {
+  const [schema]=await pool.query('SHOW CREATE TABLE settings');
+  console.log(schema);
+  const [rows]=await pool.query("SELECT setting_key,setting_value_json FROM settings WHERE setting_key LIKE 'home.%' ORDER BY setting_key");
+  console.log('HOME_SETTINGS=',JSON.stringify(rows,null,2));
+  const [tenant]=await pool.query('SELECT id,code,name,settings_json,brand_json FROM tenants WHERE id=1');
+  console.log('TENANT_1=',JSON.stringify(tenant,null,2));
+} finally { await pool.end(); }
+NODE
+
+echo "BELA_STOCK_HERO_INSPECTION=100%_OK"
