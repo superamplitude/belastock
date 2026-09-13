@@ -55,9 +55,10 @@ grep -q 'Painel do Parceiro' /tmp/bs22-parceiro.html
 grep -q 'belastock' /tmp/bs22-store.json
 
 echo "===== NGINX CANONICAL UPSTREAM PROOF ====="
-sudo -n "$CONTROL" nginx-diagnose > /tmp/bs22-nginx-proof.txt
+sudo -n "$CONTROL" nginx-diagnose > /tmp/bs22-nginx-proof.txt || true
 VHOST_PROXY="$(awk '/===== VHOST CONTENT =====/{inside=1;next}/===== ACTIVE BELASTOCK CONFIG REFERENCES =====/{inside=0} inside && /proxy_pass http:\/\/127\.0\.0\.1:[0-9]+\//{print;exit}' /tmp/bs22-nginx-proof.txt | xargs)"
 echo "VHOST_PROXY=$VHOST_PROXY"
+test -n "$VHOST_PROXY"
 echo "$VHOST_PROXY" | grep -q 'proxy_pass http://127.0.0.1:3210/'
 
 cat /tmp/bs22-health.json
