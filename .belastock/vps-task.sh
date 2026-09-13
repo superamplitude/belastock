@@ -5,7 +5,7 @@ CONTROL="/usr/local/sbin/belastock-vps-control"
 SITE="/home/lojabelastock/htdocs/belastock.com.br"
 
 echo "============================================================"
-echo " BELA STOCK - EXECUCAO TOTAL / FIX 502 CAUSA-RAIZ"
+echo " BELA STOCK - EXECUCAO TOTAL / FIX 502 CAUSA-RAIZ V2"
 echo " HOST=$(hostname)"
 echo " DATE=$(date -Is)"
 echo "============================================================"
@@ -14,9 +14,9 @@ CONTROL_OK=0
 for attempt in {1..12}; do
   echo "[CONTROL] tentativa $attempt/12"
   sudo -n "$CONTROL" refresh-control
-  if grep -q 'BELASTOCK_NGINX_REPAIR_V1' "$CONTROL"; then
+  if grep -q 'BELASTOCK_NGINX_REPAIR_V2' "$CONTROL"; then
     CONTROL_OK=1
-    echo "[CONTROL] revisao NGINX-REPAIR confirmada"
+    echo "[CONTROL] revisao NGINX-REPAIR-V2 confirmada"
     break
   fi
   echo "[CONTROL] CDN ainda entregou revisao anterior; aguardando 20s"
@@ -24,11 +24,8 @@ for attempt in {1..12}; do
 done
 test "$CONTROL_OK" = "1"
 
-# Evidencia previa: app 2.1 + banco precisam estar saudaveis antes de trocar upstream.
 sudo -n "$CONTROL" db-test
 curl -sS --fail --max-time 10 http://127.0.0.1:3210/health
-
-# Correcao unica, com backup, nginx -t, rollback automatico e validacao publica.
 sudo -n "$CONTROL" nginx-repair
 
 echo "===== PROVA FINAL ====="
