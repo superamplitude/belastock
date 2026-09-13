@@ -12,7 +12,6 @@ echo " HOST=$(hostname)"
 echo " DATE=$(date -Is)"
 echo "============================================================"
 
-# Estado operacional real, sem reaplicar codigo ja publicado.
 sudo -n "$CONTROL" db-test
 sudo -n "$CONTROL" health
 sudo -n -u lojabelastock -H bash -lc "cd '$SITE' && npm run check"
@@ -55,9 +54,11 @@ grep -q 'Painel do Cliente' /tmp/bs22-cliente.html
 grep -q 'Painel do Parceiro' /tmp/bs22-parceiro.html
 grep -q 'belastock' /tmp/bs22-store.json
 
-VHOST_PROXY="$(grep -Eo 'proxy_pass[[:space:]]+http://127\.0\.0\.1:[0-9]+/' /etc/nginx/sites-enabled/belastock.com.br.conf | head -1)"
+echo "===== NGINX CANONICAL UPSTREAM PROOF ====="
+sudo -n "$CONTROL" nginx-diagnose > /tmp/bs22-nginx-proof.txt
+VHOST_PROXY="$(awk '/===== VHOST CONTENT =====/{inside=1;next}/===== ACTIVE BELASTOCK CONFIG REFERENCES =====/{inside=0} inside && /proxy_pass http:\/\/127\.0\.0\.1:[0-9]+\//{print;exit}' /tmp/bs22-nginx-proof.txt | xargs)"
 echo "VHOST_PROXY=$VHOST_PROXY"
-echo "$VHOST_PROXY" | grep -q '127.0.0.1:3210/'
+echo "$VHOST_PROXY" | grep -q 'proxy_pass http://127.0.0.1:3210/'
 
 cat /tmp/bs22-health.json
 cat /tmp/bs22-store.json
