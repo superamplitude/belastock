@@ -166,6 +166,28 @@ EOF
   ok "RUNTIME_BELASTOCK=100%_OK"
 }
 
+nginx_diagnose(){
+  echo "BELASTOCK_NGINX_DIAG_V1"
+  echo "===== LOCAL APP ====="
+  health_local || true
+  echo "===== PORT 3210 ====="
+  ss -lntp | grep ":${APP_PORT}" || true
+  echo "===== EXPECTED VHOST ====="
+  echo "VHOST=$VHOST"
+  ls -la "$VHOST" 2>&1 || true
+  readlink -f "$VHOST" 2>&1 || true
+  echo "===== VHOST CONTENT ====="
+  sed -n '1,360p' "$VHOST" 2>&1 || true
+  echo "===== ACTIVE BELASTOCK CONFIG REFERENCES ====="
+  grep -RniE 'server_name[[:space:]].*(www\.)?belastock\.com\.br|proxy_pass[[:space:]]+http' /etc/nginx/sites-enabled /etc/nginx/conf.d 2>/dev/null || true
+  echo "===== NGINX -T BELASTOCK CONTEXT ====="
+  nginx -T 2>&1 | awk 'BEGIN{show=0;n=0} /belastock\.com\.br/{show=1;n=0} show{print;n++} n>80{show=0}' || true
+  echo "===== ORIGIN ====="
+  health_origin || true
+  echo "===== ERROR LOGS ====="
+  for f in /var/log/nginx/error.log /home/$APP_USER/logs/nginx/error.log /home/$APP_USER/logs/*error*.log; do [ -f "$f" ] && { echo "--- $f"; tail -n 120 "$f"; }; done
+}
+
 cmd="${1:-status}"
 case "$cmd" in
   runtime-repair) runtime_repair ;;
@@ -174,6 +196,7 @@ case "$cmd" in
     h="$(get_env DB_HOST)"; h="${h:-127.0.0.1}"; p="$(get_env DB_PORT)"; p="${p:-3306}"; u="$(get_env DB_USER)"; pass="$(get_env DB_PASSWORD)"; d="$(get_env DB_NAME)"
     echo "DB_HOST=$h DB_PORT=$p DB_NAME=$d DB_USER=$u"; node_db_ok "$h" "$p" "$u" "$pass" "$d"; echo "DB_AUTH_MYSQL2=OK"
     ;;
+  nginx-diagnose) nginx_diagnose ;;
   status)
     echo "BELASTOCK_SITE=$SITE BELASTOCK_PORT=$APP_PORT HOST=$(hostname) DATE=$(date -Is)"; echo "NODE=$(node -v 2>/dev/null || echo ausente) NPM=$(npm -v 2>/dev/null || echo ausente) PM2=$(pm2_bin)"
     nginx -t; systemctl is-active nginx || true; ss -lntp | grep -E ":(80|443|${APP_PORT})[[:space:]]" || true; pm2_user status || true; health_local || true; health_origin || true
