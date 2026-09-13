@@ -15,9 +15,9 @@ CONTROL_OK=0
 for attempt in {1..12}; do
   echo "[CONTROL] tentativa $attempt/12"
   sudo -n "$CONTROL" refresh-control
-  if grep -q 'conta legada nao autenticou; criando usuario dedicado limpo' "$CONTROL"; then
+  if grep -q 'node_db_ok' "$CONTROL"; then
     CONTROL_OK=1
-    echo "[CONTROL] revisao DB-FALLBACK confirmada"
+    echo "[CONTROL] revisao MYSQL2 confirmada"
     break
   fi
   echo "[CONTROL] CDN ainda entregou revisao anterior; aguardando 20s"
