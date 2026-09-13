@@ -21,34 +21,28 @@ ok(){ echo "[OK] $*"; }
 mkdir -p "$BACKUP_BASE"
 
 get_env(){ awk -F= -v k="$1" '$1==k{sub(/^[^=]*=/,"");gsub(/\r/,"");print;exit}' "$SITE/.env"; }
-set_env(){
-  local k="$1" v="$2"
-  if grep -q "^${k}=" "$SITE/.env"; then sed -i "s#^${k}=.*#${k}=${v}#" "$SITE/.env"; else printf '%s=%s\n' "$k" "$v" >> "$SITE/.env"; fi
-}
+set_env(){ local k="$1" v="$2"; if grep -q "^${k}=" "$SITE/.env"; then sed -i "s#^${k}=.*#${k}=${v}#" "$SITE/.env"; else printf '%s=%s\n' "$k" "$v" >> "$SITE/.env"; fi; }
 pm2_bin(){ [ -x "$PM2_LOCAL" ] && { echo "$PM2_LOCAL"; return; }; command -v pm2 2>/dev/null || true; }
 pm2_user(){ local p; p="$(pm2_bin)"; [ -n "$p" ] || fail "PM2 nao encontrado."; sudo -u "$APP_USER" -H env PM2_HOME="$PM2_HOME_DIR" PATH="$(dirname "$p"):/usr/local/bin:/usr/bin:/bin" "$p" "$@"; }
 
-health_local(){
-  local c; c="$(curl -sS --max-time 10 -o /tmp/bs-health-local.json -w '%{http_code}' "http://127.0.0.1:${APP_PORT}/health" || true)"
-  echo "LOCAL_HEALTH_HTTP=$c"; cat /tmp/bs-health-local.json 2>/dev/null || true; echo
-  [ "$c" = 200 ]
-}
-health_origin(){
-  local c; c="$(curl -ksS --resolve "${DOMAIN}:443:127.0.0.1" --max-time 15 -o /tmp/bs-health-origin.json -w '%{http_code}' "https://${DOMAIN}/health?bridge=$(date +%s)" || true)"
-  echo "ORIGIN_HEALTH_HTTP=$c"; cat /tmp/bs-health-origin.json 2>/dev/null || true; echo
-  [ "$c" = 200 ]
+health_local(){ local c; c="$(curl -sS --max-time 10 -o /tmp/bs-health-local.json -w '%{http_code}' "http://127.0.0.1:${APP_PORT}/health" || true)"; echo "LOCAL_HEALTH_HTTP=$c"; cat /tmp/bs-health-local.json 2>/dev/null || true; echo; [ "$c" = 200 ]; }
+health_origin(){ local c; c="$(curl -ksS --resolve "${DOMAIN}:443:127.0.0.1" --max-time 15 -o /tmp/bs-health-origin.json -w '%{http_code}' "https://${DOMAIN}/health?bridge=$(date +%s)" || true)"; echo "ORIGIN_HEALTH_HTTP=$c"; cat /tmp/bs-health-origin.json 2>/dev/null || true; echo; [ "$c" = 200 ]; }
+
+# Valida exatamente como a aplicacao valida: Node + mysql2. O mysql CLI local
+# nao suporta necessariamente caching_sha2_password, que e o plugin das contas.
+node_db_ok(){
+  local h="$1" p="$2" u="$3" pass="$4" dbname="$5"
+  sudo -u "$APP_USER" -H env DBT_HOST="$h" DBT_PORT="$p" DBT_USER="$u" DBT_PASS="$pass" DBT_NAME="$dbname" bash -lc "cd '$SITE' && node --input-type=module -e \"import mysql from 'mysql2/promise'; const c=await mysql.createConnection({host:process.env.DBT_HOST,port:Number(process.env.DBT_PORT),user:process.env.DBT_USER,password:process.env.DBT_PASS,database:process.env.DBT_NAME}); await c.query('SELECT 1'); await c.end();\"" >/dev/null 2>&1
 }
 
 MASTER_HOST=""; MASTER_PORT=""; MASTER_USER=""; MASTER_PASS=""
 load_cloudpanel_master(){
   command -v clpctl >/dev/null 2>&1 || return 1
   local raw parsed
-  raw="$(clpctl db:show:master-credentials 2>&1 || true)"
-  [ -n "$raw" ] || return 1
+  raw="$(clpctl db:show:master-credentials 2>&1 || true)"; [ -n "$raw" ] || return 1
   parsed="$(printf '%s\n' "$raw" | python3 -c '
 import sys,re,shlex
-text=sys.stdin.read()
-text=re.sub(r"\x1b\[[0-9;?]*[ -/]*[@-~]", "", text)
+text=sys.stdin.read(); text=re.sub(r"\x1b\[[0-9;?]*[ -/]*[@-~]", "", text)
 text=text.replace("│"," ").replace("┃"," ").replace("║"," ").replace("|"," ")
 lines=[x.strip() for x in text.splitlines() if x.strip()]
 host=port=user=password=""
@@ -56,15 +50,13 @@ def pick(label,line):
     m=re.search(r"(?:^|\s)"+label+r"\s*(?::|=|\s)\s*(\S+)",line,re.I)
     return m.group(1).strip("\"\x27") if m else ""
 for line in lines:
-    host=host or pick(r"Host",line)
-    port=port or pick(r"Port",line)
-    user=user or pick(r"User\s*Name",line) or pick(r"Username",line)
-    password=password or pick(r"Password",line)
+    host=host or pick(r"Host",line); port=port or pick(r"Port",line)
+    user=user or pick(r"User\s*Name",line) or pick(r"Username",line); password=password or pick(r"Password",line)
 for line in lines:
-    p=line.lower().find("mysql ")
-    if p<0: continue
-    try: a=shlex.split(line[p:])
-    except Exception: a=line[p:].split()
+    pos=line.lower().find("mysql ")
+    if pos<0: continue
+    try: a=shlex.split(line[pos:])
+    except Exception: a=line[pos:].split()
     i=0
     while i<len(a):
         t=a[i]; n=a[i+1] if i+1<len(a) else ""
@@ -82,85 +74,57 @@ for line in lines:
         elif t.startswith("-p") and len(t)>2: password=password or t[2:]
         i+=1
     break
-host=(host or "127.0.0.1").strip("\"\x27")
-port=(port or "3306").strip("\"\x27")
-user=(user or "root").strip("\"\x27")
-password=password.strip("\"\x27")
-for k,v in (("MASTER_HOST",host),("MASTER_PORT",port),("MASTER_USER",user),("MASTER_PASS",password)):
-    print(f"{k}={shlex.quote(v)}")
+host=(host or "127.0.0.1").strip("\"\x27"); port=(port or "3306").strip("\"\x27")
+user=(user or "root").strip("\"\x27"); password=password.strip("\"\x27")
+for k,v in (("MASTER_HOST",host),("MASTER_PORT",port),("MASTER_USER",user),("MASTER_PASS",password)): print(f"{k}={shlex.quote(v)}")
 ')"
-  eval "$parsed"
-  [ -n "$MASTER_PASS" ] || return 1
+  eval "$parsed"; [ -n "$MASTER_PASS" ] || return 1
   MYSQL_PWD="$MASTER_PASS" mysql --protocol=TCP -h "$MASTER_HOST" -P "$MASTER_PORT" -u "$MASTER_USER" -NBe 'SELECT 1' >/dev/null 2>&1
 }
 
 runtime_repair(){
-  [ -f "$SITE/.env" ] || fail ".env ausente."
-  [ -f "$SITE/package.json" ] || fail "package.json ausente."
-  local stamp dir DB_HOST DB_PORT DB_NAME DB_USER DB_PASS ADMIN_MODE EXISTS NEW_PASS esc ALT_USER ALT_PASS alt_esc
-  stamp="$(date +%Y%m%d_%H%M%S)"; dir="$BACKUP_BASE/runtime-$stamp"; mkdir -p "$dir"
-  cp -a "$SITE/.env" "$dir/.env.before"; chmod 600 "$dir/.env.before"
+  [ -f "$SITE/.env" ] || fail ".env ausente."; [ -f "$SITE/package.json" ] || fail "package.json ausente."
+  local stamp dir DB_HOST DB_PORT DB_NAME DB_USER DB_PASS ADMIN_MODE EXISTS NEW_PASS ALT_USER ALT_PASS
+  stamp="$(date +%Y%m%d_%H%M%S)"; dir="$BACKUP_BASE/runtime-$stamp"; mkdir -p "$dir"; cp -a "$SITE/.env" "$dir/.env.before"; chmod 600 "$dir/.env.before"
 
   echo "[1/7] PM2 isolado"
   install -d -o "$APP_USER" -g "$APP_GROUP" -m 0750 "/home/$APP_USER/.local" "$PM2_HOME_DIR"
   sudo -u "$APP_USER" -H npm install -g pm2@7 --prefix "/home/$APP_USER/.local" >/dev/null
   [ -x "$PM2_LOCAL" ] || fail "PM2 local nao instalado."
 
-  echo "[2/7] Banco Node canonical"
-  DB_HOST="$(get_env DB_HOST)"; DB_HOST="${DB_HOST:-127.0.0.1}"
-  DB_PORT="$(get_env DB_PORT)"; DB_PORT="${DB_PORT:-3306}"
+  echo "[2/7] Banco Node canonical / validacao mysql2 runtime"
+  DB_HOST="$(get_env DB_HOST)"; DB_HOST="${DB_HOST:-127.0.0.1}"; DB_PORT="$(get_env DB_PORT)"; DB_PORT="${DB_PORT:-3306}"
   DB_NAME="$(get_env DB_NAME)"; DB_USER="$(get_env DB_USER)"; DB_PASS="$(get_env DB_PASSWORD)"
-  [[ "$DB_NAME" =~ ^[A-Za-z0-9_]+$ ]] || fail "DB_NAME invalido."
-  [[ "$DB_USER" =~ ^[A-Za-z0-9_]+$ ]] || fail "DB_USER invalido."
-  app_db_ok(){ MYSQL_PWD="$DB_PASS" mysql --protocol=TCP --connect-timeout=5 -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -NBe 'SELECT 1' "$DB_NAME" >/dev/null 2>&1; }
+  [[ "$DB_NAME" =~ ^[A-Za-z0-9_]+$ ]] || fail "DB_NAME invalido."; [[ "$DB_USER" =~ ^[A-Za-z0-9_]+$ ]] || fail "DB_USER invalido."
 
-  if ! app_db_ok; then
-    ADMIN_MODE=""
-    if mysql -NBe 'SELECT 1' >/dev/null 2>&1; then ADMIN_MODE="socket-root"; elif load_cloudpanel_master; then ADMIN_MODE="cloudpanel"; fi
-    [ -n "$ADMIN_MODE" ] || fail "Sem acesso administrativo seguro ao MySQL."
-    echo "MYSQL_ADMIN_MODE=$ADMIN_MODE"
+  if ! node_db_ok "$DB_HOST" "$DB_PORT" "$DB_USER" "$DB_PASS" "$DB_NAME"; then
+    ADMIN_MODE=""; if mysql -NBe 'SELECT 1' >/dev/null 2>&1; then ADMIN_MODE="socket-root"; elif load_cloudpanel_master; then ADMIN_MODE="cloudpanel"; fi
+    [ -n "$ADMIN_MODE" ] || fail "Sem acesso administrativo seguro ao MySQL."; echo "MYSQL_ADMIN_MODE=$ADMIN_MODE"
     mysql_admin(){ local q="$1"; if [ "$ADMIN_MODE" = socket-root ]; then mysql -NBe "$q"; else MYSQL_PWD="$MASTER_PASS" mysql --protocol=TCP -h "$MASTER_HOST" -P "$MASTER_PORT" -u "$MASTER_USER" -NBe "$q"; fi; }
     dump_db(){ if [ "$ADMIN_MODE" = socket-root ]; then mysqldump --single-transaction --quick --routines --triggers "$DB_NAME"; else MYSQL_PWD="$MASTER_PASS" mysqldump --protocol=TCP -h "$MASTER_HOST" -P "$MASTER_PORT" -u "$MASTER_USER" --single-transaction --quick --routines --triggers "$DB_NAME"; fi; }
 
     EXISTS="$(mysql_admin "SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name='${DB_NAME}';" | tail -1)"
-    if [ "$EXISTS" = 1 ]; then
-      dump_db | gzip -9 > "$dir/${DB_NAME}.sql.gz" || true
-      ok "Banco existente preservado em backup"
-    else
-      mysql_admin "CREATE DATABASE \`${DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-      ok "Banco $DB_NAME criado porque a auditoria confirmou ausencia; nenhum banco foi sobrescrito"
-    fi
+    if [ "$EXISTS" = 1 ]; then dump_db | gzip -9 > "$dir/${DB_NAME}.sql.gz" || true; ok "Banco existente preservado em backup"; else mysql_admin "CREATE DATABASE \`${DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"; ok "Banco $DB_NAME criado sem sobrescrever banco existente"; fi
 
-    NEW_PASS="$(openssl rand -hex 24)"; esc="$NEW_PASS"
-    mysql_admin "CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED BY '${esc}'; ALTER USER '${DB_USER}'@'localhost' IDENTIFIED BY '${esc}';"
-    mysql_admin "CREATE USER IF NOT EXISTS '${DB_USER}'@'127.0.0.1' IDENTIFIED BY '${esc}'; ALTER USER '${DB_USER}'@'127.0.0.1' IDENTIFIED BY '${esc}';"
+    NEW_PASS="$(openssl rand -hex 24)"
+    mysql_admin "CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED BY '${NEW_PASS}'; ALTER USER '${DB_USER}'@'localhost' IDENTIFIED BY '${NEW_PASS}';"
+    mysql_admin "CREATE USER IF NOT EXISTS '${DB_USER}'@'127.0.0.1' IDENTIFIED BY '${NEW_PASS}'; ALTER USER '${DB_USER}'@'127.0.0.1' IDENTIFIED BY '${NEW_PASS}';"
     mysql_admin "GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'localhost'; GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'127.0.0.1'; FLUSH PRIVILEGES;"
-    DB_HOST="127.0.0.1"; DB_PORT="3306"; DB_PASS="$NEW_PASS"
-    set_env DB_HOST "$DB_HOST"; set_env DB_PORT "$DB_PORT"; set_env DB_PASSWORD "$DB_PASS"
-    chown "$APP_USER:$APP_GROUP" "$SITE/.env"; chmod 640 "$SITE/.env"
+    DB_HOST="127.0.0.1"; DB_PORT="3306"; DB_PASS="$NEW_PASS"; set_env DB_HOST "$DB_HOST"; set_env DB_PORT "$DB_PORT"; set_env DB_PASSWORD "$DB_PASS"; chown "$APP_USER:$APP_GROUP" "$SITE/.env"; chmod 640 "$SITE/.env"
 
-    if ! app_db_ok; then
-      echo "[DB] conta legada nao autenticou; criando usuario dedicado limpo sem alterar dados"
-      ALT_USER="belastockapp"; ALT_PASS="$(openssl rand -hex 24)"; alt_esc="$ALT_PASS"
-      mysql_admin "CREATE USER IF NOT EXISTS '${ALT_USER}'@'localhost' IDENTIFIED BY '${alt_esc}'; ALTER USER '${ALT_USER}'@'localhost' IDENTIFIED BY '${alt_esc}';"
-      mysql_admin "CREATE USER IF NOT EXISTS '${ALT_USER}'@'127.0.0.1' IDENTIFIED BY '${alt_esc}'; ALTER USER '${ALT_USER}'@'127.0.0.1' IDENTIFIED BY '${alt_esc}';"
-      mysql_admin "CREATE USER IF NOT EXISTS '${ALT_USER}'@'%' IDENTIFIED BY '${alt_esc}'; ALTER USER '${ALT_USER}'@'%' IDENTIFIED BY '${alt_esc}';"
-      mysql_admin "GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${ALT_USER}'@'localhost'; GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${ALT_USER}'@'127.0.0.1'; GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${ALT_USER}'@'%'; FLUSH PRIVILEGES;"
-      DB_USER="$ALT_USER"; DB_PASS="$ALT_PASS"
-      set_env DB_USER "$DB_USER"; set_env DB_PASSWORD "$DB_PASS"
-      chown "$APP_USER:$APP_GROUP" "$SITE/.env"; chmod 640 "$SITE/.env"
+    if ! node_db_ok "$DB_HOST" "$DB_PORT" "$DB_USER" "$DB_PASS" "$DB_NAME"; then
+      echo "[DB] conta legada nao autenticou no mysql2; criando usuario dedicado limpo"
+      ALT_USER="belastockapp"; ALT_PASS="$(openssl rand -hex 24)"
+      mysql_admin "CREATE USER IF NOT EXISTS '${ALT_USER}'@'localhost' IDENTIFIED BY '${ALT_PASS}'; ALTER USER '${ALT_USER}'@'localhost' IDENTIFIED BY '${ALT_PASS}';"
+      mysql_admin "CREATE USER IF NOT EXISTS '${ALT_USER}'@'127.0.0.1' IDENTIFIED BY '${ALT_PASS}'; ALTER USER '${ALT_USER}'@'127.0.0.1' IDENTIFIED BY '${ALT_PASS}';"
+      mysql_admin "GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${ALT_USER}'@'localhost'; GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${ALT_USER}'@'127.0.0.1'; FLUSH PRIVILEGES;"
+      DB_USER="$ALT_USER"; DB_PASS="$ALT_PASS"; set_env DB_USER "$DB_USER"; set_env DB_PASSWORD "$DB_PASS"; chown "$APP_USER:$APP_GROUP" "$SITE/.env"; chmod 640 "$SITE/.env"
     fi
 
-    if ! app_db_ok; then
-      echo "[DB] diagnostico seguro de contas (sem senhas)"
-      mysql_admin "SELECT User,Host,plugin FROM mysql.user WHERE User IN ('belastock_node','belastockapp') ORDER BY User,Host;" || true
-      mysql_admin "SHOW GRANTS FOR '${DB_USER}'@'127.0.0.1';" || true
-      unset MASTER_PASS NEW_PASS ALT_PASS esc alt_esc
-      fail "Banco/usuario criados, mas autenticacao TCP local ainda falhou."
-    fi
-    unset MASTER_PASS NEW_PASS ALT_PASS esc alt_esc
+    node_db_ok "$DB_HOST" "$DB_PORT" "$DB_USER" "$DB_PASS" "$DB_NAME" || fail "mysql2 tambem nao conseguiu autenticar no banco."
+    unset MASTER_PASS NEW_PASS ALT_PASS
   fi
-  echo "DB_AUTH=OK DB_NAME=$DB_NAME DB_USER=$DB_USER"
+  echo "DB_AUTH_MYSQL2=OK DB_NAME=$DB_NAME DB_USER=$DB_USER"
 
   echo "[3/7] Dependencias e migrations"
   chown -R "$APP_USER:$APP_GROUP" "$SITE"
@@ -207,24 +171,16 @@ case "$cmd" in
   runtime-repair) runtime_repair ;;
   health) health_local; health_origin ;;
   db-test)
-    DB_HOST="$(get_env DB_HOST)"; DB_HOST="${DB_HOST:-127.0.0.1}"; DB_PORT="$(get_env DB_PORT)"; DB_PORT="${DB_PORT:-3306}"; DB_NAME="$(get_env DB_NAME)"; DB_USER="$(get_env DB_USER)"; DB_PASS="$(get_env DB_PASSWORD)"
-    echo "DB_HOST=$DB_HOST DB_PORT=$DB_PORT DB_NAME=$DB_NAME DB_USER=$DB_USER"
-    MYSQL_PWD="$DB_PASS" mysql --protocol=TCP -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -NBe 'SELECT 1' "$DB_NAME" >/dev/null; echo "DB_AUTH=OK"
+    h="$(get_env DB_HOST)"; h="${h:-127.0.0.1}"; p="$(get_env DB_PORT)"; p="${p:-3306}"; u="$(get_env DB_USER)"; pass="$(get_env DB_PASSWORD)"; d="$(get_env DB_NAME)"
+    echo "DB_HOST=$h DB_PORT=$p DB_NAME=$d DB_USER=$u"; node_db_ok "$h" "$p" "$u" "$pass" "$d"; echo "DB_AUTH_MYSQL2=OK"
     ;;
   status)
-    echo "BELASTOCK_SITE=$SITE BELASTOCK_PORT=$APP_PORT HOST=$(hostname) DATE=$(date -Is)"
-    echo "NODE=$(node -v 2>/dev/null || echo ausente) NPM=$(npm -v 2>/dev/null || echo ausente) PM2=$(pm2_bin)"
+    echo "BELASTOCK_SITE=$SITE BELASTOCK_PORT=$APP_PORT HOST=$(hostname) DATE=$(date -Is)"; echo "NODE=$(node -v 2>/dev/null || echo ausente) NPM=$(npm -v 2>/dev/null || echo ausente) PM2=$(pm2_bin)"
     nginx -t; systemctl is-active nginx || true; ss -lntp | grep -E ":(80|443|${APP_PORT})[[:space:]]" || true; pm2_user status || true; health_local || true; health_origin || true
     ;;
-  inventory)
-    echo "=== SITE ==="; ls -la "$SITE" | head -100; echo "=== VHOST ==="; grep -nE 'server_name|proxy_pass|root |listen ' "$VHOST" 2>/dev/null || true; echo "=== PORTS ==="; ss -lntup || true
-    ;;
-  backup-site)
-    stamp="$(date +%Y%m%d_%H%M%S)"; out="$BACKUP_BASE/site-${stamp}.tar.gz"; tar -C "$(dirname "$SITE")" -czf "$out" "$(basename "$SITE")"; chmod 600 "$out"; echo "BACKUP=$out"
-    ;;
-  refresh-control)
-    tmp="$(mktemp)"; curl -fsSL --retry 3 --connect-timeout 15 "$CONTROL_URL" -o "$tmp"; bash -n "$tmp"; install -o root -g root -m 0755 "$tmp" "$CONTROL_DST"; rm -f "$tmp"; ok "Controlador Bela Stock atualizado do GitHub."
-    ;;
+  inventory) echo "=== SITE ==="; ls -la "$SITE" | head -100; echo "=== VHOST ==="; grep -nE 'server_name|proxy_pass|root |listen ' "$VHOST" 2>/dev/null || true; echo "=== PORTS ==="; ss -lntup || true ;;
+  backup-site) stamp="$(date +%Y%m%d_%H%M%S)"; out="$BACKUP_BASE/site-${stamp}.tar.gz"; tar -C "$(dirname "$SITE")" -czf "$out" "$(basename "$SITE")"; chmod 600 "$out"; echo "BACKUP=$out" ;;
+  refresh-control) tmp="$(mktemp)"; curl -fsSL --retry 3 --connect-timeout 15 "$CONTROL_URL" -o "$tmp"; bash -n "$tmp"; install -o root -g root -m 0755 "$tmp" "$CONTROL_DST"; rm -f "$tmp"; ok "Controlador Bela Stock atualizado do GitHub." ;;
   nginx-test) nginx -t ;;
   nginx-reload) nginx -t; systemctl reload nginx ;;
   pm2-status) pm2_user status ;;
