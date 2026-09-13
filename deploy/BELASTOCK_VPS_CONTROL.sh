@@ -310,6 +310,19 @@ case "$cmd" in
   nginx-test) nginx -t ;;
   nginx-reload) nginx -t; systemctl reload nginx ;;
   pm2-status) pm2_user status ;;
-  pm2-restart) pm2_user restart belastock --update-env; pm2_user save; health_local ;;
+  pm2-restart)
+    pm2_user restart belastock --update-env
+    pm2_user save
+    restart_ok=0
+    for i in $(seq 1 30); do
+      if health_local >/dev/null 2>&1; then restart_ok=1; break; fi
+      sleep 1
+    done
+    if [ "$restart_ok" != 1 ]; then
+      pm2_user logs belastock --nostream --lines 120 || true
+      fail "Aplicacao nao recuperou health apos restart PM2."
+    fi
+    health_local
+    ;;
   *) fail "Comando nao autorizado: $cmd" ;;
 esac
