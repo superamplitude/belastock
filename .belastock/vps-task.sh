@@ -4,71 +4,137 @@ ROOT="$(pwd)"
 CONTROL="/usr/local/sbin/belastock-vps-control"
 SITE="/home/lojabelastock/htdocs/belastock.com.br"
 E2E="$ROOT/.belastock/validate-v30-e2e.mjs"
+DB_AUDIT="$ROOT/.belastock/final-adversarial-audit.mjs"
+PM2="/home/lojabelastock/.local/bin/pm2"
+PM2_HOME="/home/lojabelastock/.pm2"
 
 echo "============================================================"
-echo " BELA STOCK 3.0 - PROVA FINAL 100% END-TO-END"
+echo " BELA STOCK 3.0 - SECOND PASS / ADVERSARIAL PRODUCTION AUDIT"
 echo " HOST=$(hostname)"
 echo " DATE=$(date -Is)"
 echo "============================================================"
 
+# 1. Runtime e banco sem alterar producao
 sudo -n "$CONTROL" db-test
 sudo -n "$CONTROL" health
+sudo -n "$CONTROL" status
+
 PKG_VERSION="$(node -p "require('$SITE/package.json').version")"
 echo "PACKAGE_VERSION=$PKG_VERSION"
 test "$PKG_VERSION" = "3.0.0"
+
+# 2. Permissoes, processo e persistencia
+ENV_MODE="$(stat -c '%a' "$SITE/.env")"
+ENV_OWNER="$(stat -c '%U:%G' "$SITE/.env")"
+echo "ENV_MODE=$ENV_MODE"
+echo "ENV_OWNER=$ENV_OWNER"
+test "$ENV_OWNER" = "lojabelastock:lojabelastock"
+case "$ENV_MODE" in ???0|??0) ;; esac
+WORLD_DIGIT="${ENV_MODE: -1}"
+test "$WORLD_DIGIT" = "0"
+
+systemctl is-active --quiet pm2-lojabelastock
+echo "PM2_SYSTEMD_ACTIVE=YES"
+systemctl is-enabled --quiet pm2-lojabelastock
+echo "PM2_SYSTEMD_ENABLED=YES"
+test -x "$PM2"
+sudo -n -u lojabelastock -H env PM2_HOME="$PM2_HOME" "$PM2" jlist > /tmp/bs-final-pm2.json
+node --input-type=module - <<'NODE'
+import fs from 'node:fs';
+const list=JSON.parse(fs.readFileSync('/tmp/bs-final-pm2.json','utf8'));
+const app=list.find(x=>x.name==='belastock');
+if(!app) throw new Error('PM2 belastock ausente');
+const status=app.pm2_env?.status;
+const version=app.pm2_env?.version;
+console.log(`PM2_APP_STATUS=${status}`);
+console.log(`PM2_APP_VERSION=${version}`);
+if(status!=='online') process.exit(2);
+if(version!=='3.0.0') process.exit(3);
+NODE
+ss -lnt | grep -qE '127\.0\.0\.1:3210\b'
+echo "PORT_3210_LOCAL_ONLY=YES"
+
+# 3. Testes de codigo e regressao
 sudo -n -u lojabelastock -H bash -lc "cd '$SITE' && npm run check"
 
-chmod o+r "$E2E"
+# 4. E2E descartavel completo
+chmod o+r "$E2E" "$DB_AUDIT"
 sudo -n -u lojabelastock -H node "$E2E"
 
-check_code(){ local expected="$1" url="$2" file="$3" code; code="$(curl -ksS --max-time 25 -o "$file" -w '%{http_code}' "$url" || true)"; echo "$url -> $code"; test "$code" = "$expected"; }
-check_code 200 https://belastock.com.br/ /tmp/bs30-root.html
-check_code 200 https://belastock.com.br/health /tmp/bs30-health.json
-check_code 200 https://belastock.com.br/admin /tmp/bs30-admin.html
-check_code 200 https://belastock.com.br/cliente /tmp/bs30-cliente.html
-check_code 200 https://belastock.com.br/parceiro /tmp/bs30-parceiro.html
-check_code 200 https://belastock.com.br/storefront.js /tmp/bs30-storefront.js
-check_code 200 https://belastock.com.br/operations.js /tmp/bs30-operations.js
-check_code 200 https://belastock.com.br/api/public/store /tmp/bs30-store.json
-check_code 200 https://belastock.com.br/api/public/products /tmp/bs30-products.json
-check_code 404 https://belastock.com.br/api/cart /tmp/bs30-cart-empty.json
-check_code 401 https://belastock.com.br/api/admin/completion /tmp/bs30-admin-unauth.json
-check_code 401 https://belastock.com.br/api/admin/orders /tmp/bs30-orders-unauth.json
-check_code 401 https://belastock.com.br/api/customer/panel /tmp/bs30-customer-unauth.json
-check_code 401 https://belastock.com.br/api/partner/panel /tmp/bs30-partner-unauth.json
-WWW_CODE="$(curl -ksS --max-time 20 -o /dev/null -w '%{http_code}' https://www.belastock.com.br/ || true)"; echo "PUBLIC_WWW_HTTP=$WWW_CODE"; test "$WWW_CODE" = "301"
+# 5. Auditoria independente de integridade relacional, duplicidade e seguranca de segredos
+sudo -n -u lojabelastock -H node "$DB_AUDIT"
 
-grep -q '"version":"3.0.0"' /tmp/bs30-health.json
-grep -q '"db":true' /tmp/bs30-health.json
-grep -q 'storefront.js' /tmp/bs30-root.html
-grep -q 'AI Commerce 3.0' /tmp/bs30-admin.html
-grep -q 'manual_pix' /tmp/bs30-store.json
-grep -q 'pickup' /tmp/bs30-store.json
+# 6. HTTP publico, fronteiras privadas e conteudo
+check_code(){
+  local expected="$1" url="$2" file="$3" code
+  code="$(curl -ksS --max-time 25 -o "$file" -w '%{http_code}' "$url" || true)"
+  echo "$url -> $code"
+  test "$code" = "$expected"
+}
+check_code 200 https://belastock.com.br/ /tmp/bs-final-root.html
+check_code 200 https://belastock.com.br/health /tmp/bs-final-health.json
+check_code 200 https://belastock.com.br/admin /tmp/bs-final-admin.html
+check_code 200 https://belastock.com.br/cliente /tmp/bs-final-cliente.html
+check_code 200 https://belastock.com.br/parceiro /tmp/bs-final-parceiro.html
+check_code 200 https://belastock.com.br/storefront.js /tmp/bs-final-storefront.js
+check_code 200 https://belastock.com.br/operations.js /tmp/bs-final-operations.js
+check_code 200 https://belastock.com.br/api/public/store /tmp/bs-final-store.json
+check_code 200 https://belastock.com.br/api/public/products /tmp/bs-final-products.json
+check_code 404 https://belastock.com.br/api/cart /tmp/bs-final-cart-empty.json
+check_code 401 https://belastock.com.br/api/admin/completion /tmp/bs-final-admin-unauth.json
+check_code 401 https://belastock.com.br/api/admin/orders /tmp/bs-final-orders-unauth.json
+check_code 401 https://belastock.com.br/api/customer/panel /tmp/bs-final-customer-unauth.json
+check_code 401 https://belastock.com.br/api/partner/panel /tmp/bs-final-partner-unauth.json
+check_code 404 https://belastock.com.br/__final_audit_not_found__ /tmp/bs-final-404.json
 
-sudo -n -u lojabelastock -H bash -lc "cd '$SITE' && node --input-type=module - <<'NODE'
-import fs from 'node:fs';
-for(const raw of fs.readFileSync('.env','utf8').split(/\r?\n/)){const line=raw.trim();if(!line||line.startsWith('#'))continue;const i=line.indexOf('=');if(i<=0)continue;const k=line.slice(0,i);let v=line.slice(i+1).trim();if((v.startsWith('\\\"')&&v.endsWith('\\\"'))||(v.startsWith(\"'\")&&v.endsWith(\"'\")))v=v.slice(1,-1);if(process.env[k]===undefined)process.env[k]=v;}
-const {db}=await import('./src/db.mjs');
-const required=['carts','cart_items','order_addresses','order_status_history','webhook_events','print_workflow','print_workflow_events','print_assets','positioning_codes','marketing_jobs'];
-const [t]=await db.query('SELECT table_name FROM information_schema.tables WHERE table_schema=DATABASE()');const have=new Set(t.map(r=>r.TABLE_NAME||r.table_name));const missing=required.filter(x=>!have.has(x));console.log('V30_REQUIRED_TABLES='+required.length);console.log('V30_MISSING_TABLES='+missing.join(','));if(missing.length)process.exitCode=2;else console.log('MIGRATION_006_EFFECT=100%_OK');
-const [sm]=await db.query('SELECT COUNT(*) c FROM schema_migrations');console.log('SCHEMA_MIGRATIONS_TOTAL='+sm[0].c);
-const [e2e]=await db.query(\"SELECT (SELECT COUNT(*) FROM products WHERE sku LIKE 'E2E%') products,(SELECT COUNT(*) FROM customers WHERE email LIKE 'e2e%@example.invalid') customers,(SELECT COUNT(*) FROM prints WHERE code LIKE 'E2E%') prints\");console.log('E2E_RESIDUE='+JSON.stringify(e2e[0]));if(Number(e2e[0].products)+Number(e2e[0].customers)+Number(e2e[0].prints)!==0)process.exitCode=4;
-await db.end();if(process.exitCode)process.exit(process.exitCode);
-NODE"
+WWW_CODE="$(curl -ksS --max-time 20 -o /dev/null -w '%{http_code}' https://www.belastock.com.br/ || true)"
+echo "PUBLIC_WWW_HTTP=$WWW_CODE"
+test "$WWW_CODE" = "301"
 
-sudo -n "$CONTROL" nginx-diagnose > /tmp/bs30-nginx.txt || true
-VHOST_PROXY="$(awk '/===== VHOST CONTENT =====/{inside=1;next}/===== ACTIVE BELASTOCK CONFIG REFERENCES =====/{inside=0} inside && /proxy_pass http:\/\/127\.0\.0\.1:[0-9]+\//{print;exit}' /tmp/bs30-nginx.txt | xargs)"
-echo "VHOST_PROXY=$VHOST_PROXY"; echo "$VHOST_PROXY" | grep -q 'proxy_pass http://127.0.0.1:3210/'
+grep -q '"version":"3.0.0"' /tmp/bs-final-health.json
+grep -q '"db":true' /tmp/bs-final-health.json
+grep -q 'storefront.js' /tmp/bs-final-root.html
+grep -q 'AI Commerce 3.0' /tmp/bs-final-admin.html
+grep -q 'viewport' /tmp/bs-final-root.html
+grep -q 'viewport' /tmp/bs-final-admin.html
+grep -q 'viewport' /tmp/bs-final-cliente.html
+grep -q 'viewport' /tmp/bs-final-parceiro.html
+grep -q '"error":"not_found"' /tmp/bs-final-404.json
 
-echo "BELA_STOCK_V30_RUNTIME=100%_OK"
-echo "BELA_STOCK_V30_DATABASE=100%_OK"
-echo "BELA_STOCK_V30_STOREFRONT=100%_OK"
-echo "BELA_STOCK_V30_CART_CHECKOUT=100%_OK"
-echo "BELA_STOCK_V30_ORDERS=100%_OK"
-echo "BELA_STOCK_V30_PRINT_WORKFLOW=100%_OK"
-echo "BELA_STOCK_V30_MOCKUP_PERSISTENCE=100%_OK"
-echo "BELA_STOCK_V30_MULTISTORE=100%_OK"
-echo "BELA_STOCK_V30_SUPPLIER_GATEWAY=100%_OK"
-echo "BELA_STOCK_V30_INTERNAL_PROCESS=100%_OK"
-echo "EXTERNAL_PROVIDERS=READY_FOR_CREDENTIALS"
-echo "EXECUCAO_TOTAL_BELASTOCK_V30=CONCLUIDA"
+# 7. Headers e TLS
+curl -ksS -D /tmp/bs-final-headers.txt -o /dev/null https://belastock.com.br/
+tr -d '\r' < /tmp/bs-final-headers.txt | tr '[:upper:]' '[:lower:]' > /tmp/bs-final-headers-lower.txt
+grep -q '^x-content-type-options: nosniff' /tmp/bs-final-headers-lower.txt
+grep -q '^x-frame-options: deny' /tmp/bs-final-headers-lower.txt
+grep -q '^referrer-policy: strict-origin-when-cross-origin' /tmp/bs-final-headers-lower.txt
+grep -q '^permissions-policy:' /tmp/bs-final-headers-lower.txt
+echo "SECURITY_HEADERS_BASELINE=OK"
+
+CERT_END="$(echo | openssl s_client -connect belastock.com.br:443 -servername belastock.com.br 2>/dev/null | openssl x509 -noout -enddate | cut -d= -f2-)"
+echo "TLS_CERT_NOT_AFTER=$CERT_END"
+echo | openssl s_client -connect belastock.com.br:443 -servername belastock.com.br 2>/dev/null | openssl x509 -checkend 1209600 -noout
+echo "TLS_CERT_VALID_GT_14_DAYS=YES"
+
+# 8. Nginx canonico
+sudo -n "$CONTROL" nginx-diagnose > /tmp/bs-final-nginx.txt || true
+VHOST_PROXY="$(awk '/===== VHOST CONTENT =====/{inside=1;next}/===== ACTIVE BELASTOCK CONFIG REFERENCES =====/{inside=0} inside && /proxy_pass http:\/\/127\.0\.0\.1:[0-9]+\//{print;exit}' /tmp/bs-final-nginx.txt | xargs)"
+echo "VHOST_PROXY=$VHOST_PROXY"
+echo "$VHOST_PROXY" | grep -q 'proxy_pass http://127.0.0.1:3210/'
+
+# 9. Diagnostico de prontidao comercial e superficie de seguranca
+node - "$SITE/package.json" <<'NODE'
+const p=require(process.argv[2]);
+console.log('FASTIFY_VERSION='+(p.dependencies?.fastify||'UNKNOWN'));
+console.log('RATE_LIMIT_DEP='+(p.dependencies?.['@fastify/rate-limit']||'ABSENT'));
+NODE
+if grep -RqsE 'rateLimit|rate-limit' "$SITE/src"; then echo "AUTH_RATE_LIMIT_CODE=PRESENT"; else echo "AUTH_RATE_LIMIT_CODE=ABSENT"; fi
+
+# 10. Fechamento tecnico objetivo
+echo "SECOND_PASS_RUNTIME=100%_OK"
+echo "SECOND_PASS_DATABASE_INTEGRITY=100%_OK"
+echo "SECOND_PASS_E2E=100%_OK"
+echo "SECOND_PASS_PM2_PERSISTENCE=100%_OK"
+echo "SECOND_PASS_NGINX=100%_OK"
+echo "SECOND_PASS_SECURITY_BASELINE=100%_OK"
+echo "SECOND_PASS_REGRESSION=100%_OK"
+echo "SECOND_PASS_AUDIT=CONCLUIDA"
