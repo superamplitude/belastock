@@ -1,2 +1,2 @@
 execute
-# encryption-diagnostic-20260913-1855
+# strict-final-second-pass-20260913-1900
