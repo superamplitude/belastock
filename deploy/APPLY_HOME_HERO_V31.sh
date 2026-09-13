@@ -24,10 +24,6 @@ FILES=(
   "public/storefront.js"
   "public/home-admin.js"
   "public/styles.css"
-  "public/assets/hero/hero-01.webp"
-  "public/assets/hero/hero-02.webp"
-  "public/assets/hero/hero-03.webp"
-  "public/assets/hero/hero-04.webp"
 )
 
 cp -a "$SITE/src/server.mjs" "$BACKUP/server.mjs.before"
@@ -44,6 +40,31 @@ for rel in "${FILES[@]}"; do
   mkdir -p "$(dirname "$dst")"
   install -m 0644 "$src" "$dst"
 done
+
+echo "[assets] Restaurando pacote de quatro banners WEBP"
+ASSET_DIR="$SITE/public/assets/hero"
+mkdir -p "$ASSET_DIR"
+for f in hero-01.webp hero-02.webp hero-03.webp hero-04.webp; do
+  if [ -f "$ASSET_DIR/$f" ]; then mkdir -p "$BACKUP/public/assets/hero"; cp -a "$ASSET_DIR/$f" "$BACKUP/public/assets/hero/$f"; fi
+done
+ASSET_B64="$BACKUP/hero-assets.zip.b64"
+ASSET_ZIP="$BACKUP/hero-assets.zip"
+cat "$PAYLOAD"/assets-pack/hero-assets.zip.b64.part* > "$ASSET_B64"
+base64 -d "$ASSET_B64" > "$ASSET_ZIP"
+printf '%s  %s\n' 'e347b786fd9f3dcc12726e52d98b8d96e4859669c504a255cc992330f26e941c' "$ASSET_ZIP" | sha256sum -c -
+python3 - "$ASSET_ZIP" "$ASSET_DIR" <<'PYZIP'
+import sys,zipfile,pathlib
+zp=pathlib.Path(sys.argv[1]); out=pathlib.Path(sys.argv[2])
+allowed={f'hero-{i:02d}.webp' for i in range(1,5)}
+with zipfile.ZipFile(zp) as z:
+    names=set(z.namelist())
+    if names!=allowed: raise SystemExit(f'asset names invalid: {names}')
+    for name in sorted(names):
+        data=z.read(name)
+        if not (len(data)>12 and data[:4]==b'RIFF' and data[8:12]==b'WEBP'):
+            raise SystemExit(f'invalid webp: {name}')
+        (out/name).write_bytes(data)
+PYZIP
 
 node - "$SITE/src/server.mjs" <<'NODE'
 const fs=require('fs');
@@ -130,6 +151,7 @@ npm run check
 
 echo "[4/5] Integridade do payload"
 for rel in "${FILES[@]}"; do test -f "$SITE/$rel"; done
+for f in hero-01.webp hero-02.webp hero-03.webp hero-04.webp; do test -s "$SITE/public/assets/hero/$f"; done
 grep -q "registerHomeCustomizationRoutes" "$SITE/src/server.mjs"
 grep -q "hero-slider" "$SITE/public/index.html"
 grep -q "home-hero" "$SITE/public/admin.html"
