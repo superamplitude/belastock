@@ -28,8 +28,6 @@ pm2_user(){ local p; p="$(pm2_bin)"; [ -n "$p" ] || fail "PM2 nao encontrado."; 
 health_local(){ local c; c="$(curl -sS --max-time 10 -o /tmp/bs-health-local.json -w '%{http_code}' "http://127.0.0.1:${APP_PORT}/health" || true)"; echo "LOCAL_HEALTH_HTTP=$c"; cat /tmp/bs-health-local.json 2>/dev/null || true; echo; [ "$c" = 200 ]; }
 health_origin(){ local c; c="$(curl -ksS --resolve "${DOMAIN}:443:127.0.0.1" --max-time 15 -o /tmp/bs-health-origin.json -w '%{http_code}' "https://${DOMAIN}/health?bridge=$(date +%s)" || true)"; echo "ORIGIN_HEALTH_HTTP=$c"; cat /tmp/bs-health-origin.json 2>/dev/null || true; echo; [ "$c" = 200 ]; }
 
-# Valida exatamente como a aplicacao valida: Node + mysql2. O mysql CLI local
-# nao suporta necessariamente caching_sha2_password, que e o plugin das contas.
 node_db_ok(){
   local h="$1" p="$2" u="$3" pass="$4" dbname="$5"
   sudo -u "$APP_USER" -H env DBT_HOST="$h" DBT_PORT="$p" DBT_USER="$u" DBT_PASS="$pass" DBT_NAME="$dbname" bash -lc "cd '$SITE' && node --input-type=module -e \"import mysql from 'mysql2/promise'; const c=await mysql.createConnection({host:process.env.DBT_HOST,port:Number(process.env.DBT_PORT),user:process.env.DBT_USER,password:process.env.DBT_PASS,database:process.env.DBT_NAME}); await c.query('SELECT 1'); await c.end();\"" >/dev/null 2>&1
@@ -168,24 +166,61 @@ EOF
 
 nginx_diagnose(){
   echo "BELASTOCK_NGINX_DIAG_V1"
-  echo "===== LOCAL APP ====="
-  health_local || true
-  echo "===== PORT 3210 ====="
-  ss -lntp | grep ":${APP_PORT}" || true
-  echo "===== EXPECTED VHOST ====="
-  echo "VHOST=$VHOST"
-  ls -la "$VHOST" 2>&1 || true
-  readlink -f "$VHOST" 2>&1 || true
-  echo "===== VHOST CONTENT ====="
-  sed -n '1,360p' "$VHOST" 2>&1 || true
-  echo "===== ACTIVE BELASTOCK CONFIG REFERENCES ====="
-  grep -RniE 'server_name[[:space:]].*(www\.)?belastock\.com\.br|proxy_pass[[:space:]]+http' /etc/nginx/sites-enabled /etc/nginx/conf.d 2>/dev/null || true
-  echo "===== NGINX -T BELASTOCK CONTEXT ====="
-  nginx -T 2>&1 | awk 'BEGIN{show=0;n=0} /belastock\.com\.br/{show=1;n=0} show{print;n++} n>80{show=0}' || true
-  echo "===== ORIGIN ====="
-  health_origin || true
-  echo "===== ERROR LOGS ====="
-  for f in /var/log/nginx/error.log /home/$APP_USER/logs/nginx/error.log /home/$APP_USER/logs/*error*.log; do [ -f "$f" ] && { echo "--- $f"; tail -n 120 "$f"; }; done
+  echo "===== LOCAL APP ====="; health_local || true
+  echo "===== PORT 3210 ====="; ss -lntp | grep ":${APP_PORT}" || true
+  echo "===== EXPECTED VHOST ====="; echo "VHOST=$VHOST"; ls -la "$VHOST" 2>&1 || true; readlink -f "$VHOST" 2>&1 || true
+  echo "===== VHOST CONTENT ====="; sed -n '1,360p' "$VHOST" 2>&1 || true
+  echo "===== ACTIVE BELASTOCK CONFIG REFERENCES ====="; grep -RniE 'server_name[[:space:]].*(www\.)?belastock\.com\.br|proxy_pass[[:space:]]+http' /etc/nginx/sites-enabled /etc/nginx/conf.d 2>/dev/null || true
+  echo "===== NGINX -T BELASTOCK CONTEXT ====="; nginx -T 2>&1 | awk 'BEGIN{show=0;n=0} /belastock\.com\.br/{show=1;n=0} show{print;n++} n>80{show=0}' || true
+  echo "===== ORIGIN ====="; health_origin || true
+  echo "===== ERROR LOGS ====="; for f in /var/log/nginx/error.log /home/$APP_USER/logs/nginx/error.log /home/$APP_USER/logs/*error*.log; do [ -f "$f" ] && { echo "--- $f"; tail -n 120 "$f"; }; done
+}
+
+nginx_repair(){
+  echo "BELASTOCK_NGINX_REPAIR_V1"
+  [ -f "$VHOST" ] || fail "Vhost Bela Stock ausente: $VHOST"
+  health_local || fail "App local nao esta saudavel em 127.0.0.1:${APP_PORT}."
+  local stamp backup old_count new_count origin_root public_health www_code www_location
+  stamp="$(date +%Y%m%d_%H%M%S)"; backup="$BACKUP_BASE/belastock-vhost-${stamp}.conf"
+  cp -a "$VHOST" "$backup"; chmod 600 "$backup"; echo "VHOST_BACKUP=$backup"
+
+  old_count="$(grep -Ec 'proxy_pass[[:space:]]+http://127\.0\.0\.1:3003/;' "$VHOST" || true)"
+  new_count="$(grep -Ec "proxy_pass[[:space:]]+http://127\\.0\\.0\\.1:${APP_PORT}/;" "$VHOST" || true)"
+  echo "UPSTREAM_OLD_3003_COUNT=$old_count"
+  echo "UPSTREAM_CANONICAL_${APP_PORT}_COUNT=$new_count"
+
+  if [ "$new_count" -eq 1 ] && [ "$old_count" -eq 0 ]; then
+    echo "VHOST_CHANGE=ALREADY_CANONICAL"
+  elif [ "$old_count" -eq 1 ] && [ "$new_count" -eq 0 ]; then
+    sed -i "s#proxy_pass http://127.0.0.1:3003/;#proxy_pass http://127.0.0.1:${APP_PORT}/;#" "$VHOST"
+    echo "VHOST_CHANGE=3003_TO_${APP_PORT}"
+  else
+    fail "Estado de upstream inesperado; rollback nao necessario porque nenhuma alteracao foi aplicada."
+  fi
+
+  grep -q "proxy_pass http://127.0.0.1:${APP_PORT}/;" "$VHOST" || { cp -a "$backup" "$VHOST"; fail "Upstream canonical nao persistiu; vhost restaurado."; }
+  if ! nginx -t; then cp -a "$backup" "$VHOST"; nginx -t || true; fail "nginx -t rejeitou a configuracao; vhost restaurado."; fi
+  systemctl reload nginx
+  systemctl is-active --quiet nginx || { cp -a "$backup" "$VHOST"; nginx -t && systemctl reload nginx; fail "Nginx nao permaneceu ativo; rollback aplicado."; }
+
+  health_origin || { cp -a "$backup" "$VHOST"; nginx -t && systemctl reload nginx; fail "Origem continuou sem health 200; rollback aplicado."; }
+  origin_root="$(curl -ksS --resolve "${DOMAIN}:443:127.0.0.1" --max-time 15 -o /tmp/bs-origin-root.html -w '%{http_code}' "https://${DOMAIN}/" || true)"
+  echo "ORIGIN_ROOT_HTTP=$origin_root"
+  [[ "$origin_root" =~ ^(200|301|302)$ ]] || fail "Raiz da origem nao retornou 200/301/302."
+
+  www_code="$(curl -ksS --resolve "www.${DOMAIN}:443:127.0.0.1" --max-time 15 -o /dev/null -D /tmp/bs-www.headers -w '%{http_code}' "https://www.${DOMAIN}/" || true)"
+  www_location="$(awk 'BEGIN{IGNORECASE=1}/^location:/{sub(/\r$/,"");print $2;exit}' /tmp/bs-www.headers 2>/dev/null || true)"
+  echo "WWW_HTTP=$www_code WWW_LOCATION=${www_location:-none}"
+  [ "$www_code" = 301 ] || fail "WWW nao esta redirecionando com 301."
+
+  public_health="$(curl -ksS --max-time 20 -o /tmp/bs-public-health.json -w '%{http_code}' "https://${DOMAIN}/health?public=$(date +%s)" || true)"
+  echo "PUBLIC_HEALTH_HTTP=$public_health"; cat /tmp/bs-public-health.json 2>/dev/null || true; echo
+  [ "$public_health" = 200 ] || fail "Publico ainda nao respondeu health 200."
+
+  echo "VHOST_UPSTREAM_FINAL=$(grep -Eo 'proxy_pass[[:space:]]+http://127\.0\.0\.1:[0-9]+/' "$VHOST" | head -1)"
+  ok "ORIGIN_BELASTOCK=100%_OK"
+  ok "PUBLICO_BELASTOCK=100%_OK"
+  ok "NGINX_ROOT_CAUSE_FIXED=3003_TO_${APP_PORT}"
 }
 
 cmd="${1:-status}"
@@ -197,6 +232,7 @@ case "$cmd" in
     echo "DB_HOST=$h DB_PORT=$p DB_NAME=$d DB_USER=$u"; node_db_ok "$h" "$p" "$u" "$pass" "$d"; echo "DB_AUTH_MYSQL2=OK"
     ;;
   nginx-diagnose) nginx_diagnose ;;
+  nginx-repair) nginx_repair ;;
   status)
     echo "BELASTOCK_SITE=$SITE BELASTOCK_PORT=$APP_PORT HOST=$(hostname) DATE=$(date -Is)"; echo "NODE=$(node -v 2>/dev/null || echo ausente) NPM=$(npm -v 2>/dev/null || echo ausente) PM2=$(pm2_bin)"
     nginx -t; systemctl is-active nginx || true; ss -lntp | grep -E ":(80|443|${APP_PORT})[[:space:]]" || true; pm2_user status || true; health_local || true; health_origin || true
