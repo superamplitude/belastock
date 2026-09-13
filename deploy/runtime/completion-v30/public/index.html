@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Bela Stock</title><link rel="stylesheet" href="/styles.css">
+</head>
+<body class="store-page">
+  <div class="topbar" id="topbar">Bela Stock · arte, personalização e produtos selecionados</div>
+  <header class="site-header">
+    <a class="brand" href="/">BELA STOCK</a>
+    <nav><a href="#catalogo">Catálogo</a><a href="/cliente">Minha conta</a><button class="btn ghost" id="cart-open">Carrinho <span id="cart-count">0</span></button></nav>
+  </header>
+  <main>
+    <section class="hero">
+      <div><div class="eyebrow">AI COMMERCE</div><h1 id="hero-title">Produtos, estampas e personalização em um só lugar.</h1><p id="hero-text">Catálogo Bela Stock com operação multi-fornecedor, checkout seguro e acompanhamento pelo cliente.</p><a class="btn" href="#catalogo">Ver catálogo</a></div>
+      <div class="hero-card"><strong>Compra simples</strong><span>Escolha</span><span>Personalize</span><span>Finalize</span><span>Acompanhe</span></div>
+    </section>
+    <section id="catalogo" class="section"><div class="section-head"><div><div class="eyebrow">CATÁLOGO</div><h2>Produtos</h2></div><button class="btn ghost" id="reload-products">Atualizar</button></div><div id="products" class="product-grid"><div class="card">Carregando catálogo...</div></div></section>
+  </main>
+
+  <aside id="cart-drawer" class="drawer" aria-hidden="true">
+    <div class="drawer-head"><div><div class="eyebrow">SEU PEDIDO</div><h2>Carrinho</h2></div><button class="icon-btn" id="cart-close">×</button></div>
+    <div id="cart-items"></div><div id="cart-totals" class="totals"></div>
+    <div class="card compact"><h3>Entrega</h3><select id="shipping-method"><option value="pickup">Retirada no local</option></select><button class="btn ghost full" id="quote-cart">Calcular total</button></div>
+    <div class="card compact"><h3>Entrar para finalizar</h3><div class="tabs"><button id="tab-login" class="tab active">Entrar</button><button id="tab-register" class="tab">Criar conta</button></div>
+      <div id="login-box"><input id="login-email" type="email" placeholder="E-mail"><input id="login-password" type="password" placeholder="Senha"><button class="btn full" id="login-btn">Entrar</button></div>
+      <div id="register-box" hidden><input id="reg-name" placeholder="Nome"><input id="reg-email" type="email" placeholder="E-mail"><input id="reg-phone" placeholder="Telefone"><input id="reg-password" type="password" placeholder="Senha (mín. 8 caracteres)"><button class="btn full" id="register-btn">Criar conta e entrar</button></div>
+      <div id="auth-info" class="muted"></div>
+    </div>
+    <div class="card compact"><h3>Endereço</h3><input id="addr-postal" placeholder="CEP"><input id="addr-street" placeholder="Rua"><div class="row"><input id="addr-number" placeholder="Número"><input id="addr-complement" placeholder="Complemento"></div><input id="addr-district" placeholder="Bairro"><div class="row"><input id="addr-city" placeholder="Cidade"><input id="addr-state" placeholder="UF"></div></div>
+    <div class="card compact"><h3>Pagamento</h3><select id="payment-provider"><option value="manual_pix">PIX</option></select><button class="btn full" id="checkout-btn">Finalizar pedido</button><div id="checkout-result" class="notice"></div></div>
+  </aside>
+  <div id="drawer-backdrop" class="backdrop" hidden></div>
+  <footer><strong>Bela Stock</strong><span>Plataforma Node.js · operação auditável</span></footer>
+  <script src="/storefront.js"></script>
+</body></html>
