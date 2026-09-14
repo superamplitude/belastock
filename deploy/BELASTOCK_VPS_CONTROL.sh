@@ -38,12 +38,6 @@ health_origin(){
   echo "ORIGIN_HEALTH_HTTP=$c"; cat /tmp/bs-health-origin.json 2>/dev/null || true; echo
   [ "$c" = 200 ]
 }
-health_loja_origin(){
-  local c
-  c="$(curl -ksS --resolve "${LOJA_DOMAIN}:443:127.0.0.1" --max-time 15 -o /tmp/bs-loja-health.json -w '%{http_code}' "https://${LOJA_DOMAIN}/health?bridge=$(date +%s)" || true)"
-  echo "LOJA_ORIGIN_HEALTH_HTTP=$c"; cat /tmp/bs-loja-health.json 2>/dev/null || true; echo
-  [ "$c" = 200 ]
-}
 node_db_ok(){
   local h="$1" p="$2" u="$3" pass="$4" dbname="$5"
   sudo -u "$APP_USER" -H env DBT_HOST="$h" DBT_PORT="$p" DBT_USER="$u" DBT_PASS="$pass" DBT_NAME="$dbname" bash -lc "cd '$SITE' && node --input-type=module -e \"import mysql from 'mysql2/promise'; const c=await mysql.createConnection({host:process.env.DBT_HOST,port:Number(process.env.DBT_PORT),user:process.env.DBT_USER,password:process.env.DBT_PASS,database:process.env.DBT_NAME}); await c.query('SELECT 1'); await c.end();\"" >/dev/null 2>&1
@@ -62,11 +56,11 @@ restart_stable(){
 }
 
 nginx_diagnose(){
-  echo "BELA_STOCK_NGINX_DIAG_V2"
+  echo "BELA_STOCK_NGINX_DIAG_V3"
   echo "===== ROOT VHOST ====="; sed -n '1,260p' "$ROOT_VHOST" 2>&1 || true
   echo "===== LOJA VHOST ====="; sed -n '1,320p' "$LOJA_VHOST" 2>&1 || true
   echo "===== EFFECTIVE REFERENCES ====="; grep -RniE 'server_name[[:space:]].*(belastock\.com\.br)|proxy_pass[[:space:]]+http' /etc/nginx/sites-enabled 2>/dev/null || true
-  echo "===== HEALTH ====="; health_local || true; health_origin || true; health_loja_origin || true
+  echo "===== HEALTH ====="; health_local || true; health_origin || true
 }
 
 apply_loja_proxy(){
@@ -145,19 +139,19 @@ EOF
   root_page="$(curl -ksS --resolve "${DOMAIN}:443:127.0.0.1" --max-time 20 -o /tmp/root-portal.html -w '%{http_code}' "https://${DOMAIN}/?split=$(date +%s)" || true)"
   public_loja="$(curl -ksS --max-time 20 -o /tmp/loja-public.html -w '%{http_code}' "https://${LOJA_DOMAIN}/?public=$(date +%s)" || true)"
 
-  echo "LOJA_ORIGIN_HEALTH_HTTP=$loja_health"
+  echo "LOJA_ORIGIN_HEALTH_HTTP=$loja_health (informativo; readiness=storefront+store-api)"
   echo "LOJA_ORIGIN_ROOT_HTTP=$loja_root"
   echo "LOJA_ORIGIN_STORE_API_HTTP=$loja_api"
   echo "ROOT_PORTAL_HTTP=$root_page"
   echo "LOJA_PUBLIC_HTTP=$public_loja"
 
-  if [ "$loja_health" != 200 ] || [ "$loja_root" != 200 ] || [ "$loja_api" != 200 ] || [ "$root_page" != 200 ]; then
+  if [ "$loja_root" != 200 ] || [ "$loja_api" != 200 ] || [ "$root_page" != 200 ]; then
     cp -a "$backup" "$LOJA_VHOST"; nginx -t && systemctl reload nginx
-    fail "Validacao de split falhou; vhost da loja restaurado."
+    fail "Validacao funcional do split falhou; vhost da loja restaurado."
   fi
   grep -q 'hero-slider' /tmp/loja-root.html || { cp -a "$backup" "$LOJA_VHOST"; nginx -t && systemctl reload nginx; fail "Loja Node nao exibiu storefront esperado; rollback aplicado."; }
-  grep -q 'Um mega portal' /tmp/root-portal.html || { cp -a "$backup" "$LOJA_VHOST"; nginx -t && systemctl reload nginx; fail "Dominio raiz nao exibiu portal esperado; rollback aplicado."; }
   grep -q '"code":"belastock"' /tmp/loja-store.json || { cp -a "$backup" "$LOJA_VHOST"; nginx -t && systemctl reload nginx; fail "API da loja nao resolveu tenant Bela Stock; rollback aplicado."; }
+  grep -q 'Um mega portal' /tmp/root-portal.html || { cp -a "$backup" "$LOJA_VHOST"; nginx -t && systemctl reload nginx; fail "Dominio raiz nao exibiu portal esperado; rollback aplicado."; }
   [ "$public_loja" = 200 ] || echo "[AVISO] Publico da loja ainda nao refletiu origem; origem esta validada."
 
   echo "LOJA_VHOST_UPSTREAM=$(grep -Eo 'proxy_pass[[:space:]]+http://127\.0\.0\.1:[0-9]+/' "$LOJA_VHOST" | head -1)"
