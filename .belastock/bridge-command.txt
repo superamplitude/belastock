@@ -1,2 +1,2 @@
-execute
-# home-hero-v31-fixed-20260913-2105
+verify
+# direct-vps-final-verify-20260913-2108
