@@ -1,2 +1,2 @@
-verify
-# direct-vps-final-verify-20260913-2108
+execute
+# root-loja-audit-20260913-2111
