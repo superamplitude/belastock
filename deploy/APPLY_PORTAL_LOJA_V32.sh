@@ -28,6 +28,8 @@ const old="app.get('/', { preHandler:requireTenant }, async (_request,reply) => 
 const next=`app.get('/', { preHandler:requireTenant }, async (request,reply) => {\n  const host=hostOf(request).toLowerCase().split(':')[0];\n  const page=(host==='belastock.com.br'||host==='www1.belastock.com.br')?'portal.html':'index.html';\n  return reply.type('text/html; charset=utf-8').send(await fs.readFile(path.join(publicDir,page),'utf8'));\n});`;
 if(s.includes(old)) s=s.replace(old,next);
 else if(!s.includes("const page=(host==='belastock.com.br'")) throw new Error('root route anchor not found');
+if(s.includes("if (request.url === '/health') return;")) s=s.replace("if (request.url === '/health') return;","if (request.url.startsWith('/health')) return;");
+else if(!s.includes("request.url.startsWith('/health')")) throw new Error('health preHandler anchor not found');
 s=s.replace(/version:'3\.1\.0'/g,"version:'3.2.0'");
 fs.writeFileSync(file,s);
 NODE
@@ -61,6 +63,7 @@ grep -q 'Um mega portal' public/portal.html
 grep -q 'Departamentos Bela Stock' public/portal.html
 grep -q 'loja.belastock.com.br' public/portal.html
 grep -q "portal.html':'index.html" src/server.mjs
+grep -q "request.url.startsWith('/health')" src/server.mjs
 
 echo "[4/5] Versao"
 echo "BELA_STOCK_VERSION=$(node -p "require('./package.json').version")"
