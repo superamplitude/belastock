@@ -1,33 +1,38 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
-
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SITE="/home/lojabelastock/htdocs/belastock.com.br"
 APP_USER="lojabelastock"
 
 echo "============================================================"
-echo " BELA STOCK - DEPLOY HOME HERO V3.1"
+echo " BELA STOCK - AUDITORIA ROOT x LOJA"
 echo " HOST=$(hostname) DATE=$(date -Is)"
 echo "============================================================"
 
-test -d "$SITE"
-test -f "$REPO_ROOT/deploy/APPLY_HOME_HERO_V31.sh"
-test -d "$REPO_ROOT/deploy/runtime/home-hero-v31"
+echo "[1/5] Vhosts relevantes"
+for f in /etc/nginx/sites-enabled/belastock.com.br.conf /etc/nginx/sites-enabled/loja.belastock.com.br.conf; do
+  echo "--- $f"
+  if [ -f "$f" ]; then sudo -n grep -nE 'server_name|proxy_pass|root |listen |ssl_certificate' "$f" || true; else echo MISSING; fi
+done
 
-echo "[1/4] Aplicando pacote de hero/carrossel editavel"
-sudo -n -u "$APP_USER" -H bash "$REPO_ROOT/deploy/APPLY_HOME_HERO_V31.sh"
+echo "[2/5] Respostas publicas"
+for u in https://belastock.com.br/ https://loja.belastock.com.br/; do
+  code="$(curl -kLsS --max-redirs 5 --max-time 20 -o /tmp/bs-page.html -w '%{http_code}' "$u?route-audit=$(date +%s)" || true)"
+  echo "$u HTTP=$code TITLE=$(grep -oPm1 '(?<=<title>)[^<]+' /tmp/bs-page.html || true) HERO=$(grep -c 'hero-slider' /tmp/bs-page.html || true)"
+done
 
-echo "[2/4] Reiniciando aplicacao"
-sudo -n /usr/local/sbin/belastock-vps-control pm2-restart
+echo "[3/5] Tenant domains"
+sudo -n -u "$APP_USER" -H bash -lc "cd '$SITE' && node --input-type=module <<'NODE'
+import 'dotenv/config';import mysql from 'mysql2/promise';
+const c=await mysql.createConnection({host:process.env.DB_HOST||'127.0.0.1',port:Number(process.env.DB_PORT||3306),user:process.env.DB_USER,password:process.env.DB_PASSWORD,database:process.env.DB_NAME});
+const [r]=await c.query('SELECT td.id,td.tenant_id,td.domain,td.is_primary,td.status,td.ssl_status FROM tenant_domains td ORDER BY td.tenant_id,td.id');
+console.log(JSON.stringify(r));await c.end();
+NODE"
 
-echo "[3/4] Verificando health e status"
+echo "[4/5] Rotas HTML live"
+sudo -n -u "$APP_USER" -H grep -nE "app.get\('/'|index.html|portal.html" "$SITE/src/server.mjs" || true
+
+echo "[5/5] Status"
 sudo -n /usr/local/sbin/belastock-vps-control health
 sudo -n /usr/local/sbin/belastock-vps-control status
 
-echo "[4/4] Verificando pagina publica"
-CODE="$(curl -kLsS --max-redirs 5 --max-time 30 -o /tmp/belastock-home.html -w '%{http_code}' "https://belastock.com.br/?hero-v31=$(date +%s)" || true)"
-echo "PUBLIC_HOME_HTTP=$CODE"
-test "$CODE" = "200"
-grep -q "hero-slider" /tmp/belastock-home.html || { echo "[ERRO] hero-slider nao encontrado no HTML publico" >&2; exit 1; }
-
-echo "BELA_STOCK_HOME_HERO_V31=100%_OK"
+echo "ROOT_LOJA_AUDIT=COMPLETE"
