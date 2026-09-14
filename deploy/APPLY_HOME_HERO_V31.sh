@@ -51,7 +51,7 @@ ASSET_B64="$BACKUP/hero-assets.zip.b64"
 ASSET_ZIP="$BACKUP/hero-assets.zip"
 cat "$PAYLOAD"/assets-pack/hero-assets.zip.b64.part* > "$ASSET_B64"
 base64 -d "$ASSET_B64" > "$ASSET_ZIP"
-printf '%s  %s\n' 'e347b786fd9f3dcc12726e52d98b8d96e4859669c504a255cc992330f26e941c' "$ASSET_ZIP" | sha256sum -c -
+printf '%s  %s\n' '83a840695a9d45b51b32117ecd783d3b5240b650be4e0b050633b1532e3ea623' "$ASSET_ZIP" | sha256sum -c -
 python3 - "$ASSET_ZIP" "$ASSET_DIR" <<'PYZIP'
 import sys,zipfile,pathlib
 zp=pathlib.Path(sys.argv[1]); out=pathlib.Path(sys.argv[2])
