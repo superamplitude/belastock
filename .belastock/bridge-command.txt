@@ -1,2 +1,2 @@
 execute
-# hero-assets-checksum-20260913-2103
+# home-hero-v31-fixed-20260913-2105
